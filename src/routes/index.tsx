@@ -1,6 +1,7 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { Gamepad2, LogIn, Plus, Users } from "lucide-react";
 import { useState } from "react";
+import { useI18n } from "#/lib/i18n";
 import {
 	createSessionFn,
 	joinSessionFn,
@@ -15,6 +16,7 @@ export const Route = createFileRoute("/")({
 function LobbyPage() {
 	const sessions = Route.useLoaderData();
 	const navigate = useNavigate();
+	const { t } = useI18n();
 	const [playerName, setPlayerName] = useState("");
 	const [showCreate, setShowCreate] = useState(false);
 	const [showJoin, setShowJoin] = useState<string | null>(null);
@@ -23,7 +25,7 @@ function LobbyPage() {
 
 	async function handleCreate() {
 		if (!playerName.trim()) {
-			setError("Enter your name");
+			setError(t("lobby.nameRequired"));
 			return;
 		}
 		setLoading(true);
@@ -39,7 +41,7 @@ function LobbyPage() {
 				params: { sessionId: result.sessionId },
 			});
 		} catch (e) {
-			setError(e instanceof Error ? e.message : "Failed to create session");
+			setError(e instanceof Error ? e.message : t("lobby.failedCreate"));
 		} finally {
 			setLoading(false);
 		}
@@ -47,7 +49,7 @@ function LobbyPage() {
 
 	async function handleJoin(sessionId: string) {
 		if (!playerName.trim()) {
-			setError("Enter your name");
+			setError(t("lobby.nameRequired"));
 			return;
 		}
 		setLoading(true);
@@ -63,7 +65,7 @@ function LobbyPage() {
 				params: { sessionId: result.sessionId },
 			});
 		} catch (e) {
-			setError(e instanceof Error ? e.message : "Failed to join session");
+			setError(e instanceof Error ? e.message : t("lobby.failedJoin"));
 		} finally {
 			setLoading(false);
 		}
@@ -75,11 +77,9 @@ function LobbyPage() {
 				<div>
 					<h1 className="text-3xl font-bold text-white flex items-center gap-3">
 						<Gamepad2 className="w-8 h-8 text-blue-400" />
-						Game Lobby
+						{t("lobby.title")}
 					</h1>
-					<p className="text-[#A1A1AA] mt-1">
-						Create or join a Pok Deng session
-					</p>
+					<p className="text-[#A1A1AA] mt-1">{t("lobby.subtitle")}</p>
 				</div>
 				<button
 					type="button"
@@ -87,28 +87,28 @@ function LobbyPage() {
 					className="flex items-center gap-2 px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium transition-colors"
 				>
 					<Plus className="w-4 h-4" />
-					New Game
+					{t("lobby.newGame")}
 				</button>
 			</div>
 
 			{(showCreate || showJoin) && (
 				<div className="bg-[#27272A] border border-[#3F3F46] rounded-xl p-6 space-y-4">
 					<h2 className="text-lg font-semibold text-white">
-						{showCreate ? "Create New Game" : "Join Game"}
+						{showCreate ? t("lobby.createGame") : t("lobby.joinGame")}
 					</h2>
 					<div>
 						<label
 							htmlFor="playerName"
 							className="block text-sm text-[#A1A1AA] mb-1"
 						>
-							Your Name
+							{t("lobby.yourName")}
 						</label>
 						<input
 							id="playerName"
 							type="text"
 							value={playerName}
 							onChange={(e) => setPlayerName(e.target.value)}
-							placeholder="Enter your name..."
+							placeholder={t("lobby.namePlaceholder")}
 							className="w-full px-3 py-2 bg-[#18181B] border border-[#3F3F46] rounded-lg text-white placeholder-[#71717A] focus:outline-none focus:border-blue-500"
 							maxLength={20}
 						/>
@@ -123,7 +123,11 @@ function LobbyPage() {
 							disabled={loading}
 							className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white rounded-lg font-medium transition-colors"
 						>
-							{loading ? "Loading..." : showCreate ? "Create" : "Join"}
+							{loading
+								? t("lobby.loading")
+								: showCreate
+									? t("lobby.create")
+									: t("lobby.join")}
 						</button>
 						<button
 							type="button"
@@ -134,7 +138,7 @@ function LobbyPage() {
 							}}
 							className="px-4 py-2 bg-[#3F3F46] hover:bg-[#52525B] text-white rounded-lg font-medium transition-colors"
 						>
-							Cancel
+							{t("lobby.cancel")}
 						</button>
 					</div>
 				</div>
@@ -142,14 +146,12 @@ function LobbyPage() {
 
 			<div className="space-y-3">
 				<h2 className="text-lg font-semibold text-[#A1A1AA]">
-					Active Sessions
+					{t("lobby.activeSessions")}
 				</h2>
 				{sessions.length === 0 ? (
 					<div className="bg-[#27272A] border border-[#3F3F46] rounded-xl p-12 text-center">
 						<Gamepad2 className="w-12 h-12 text-[#71717A] mx-auto mb-3" />
-						<p className="text-[#71717A]">
-							No active sessions. Create one to get started!
-						</p>
+						<p className="text-[#71717A]">{t("lobby.noSessions")}</p>
 					</div>
 				) : (
 					<div className="grid gap-3">
@@ -164,10 +166,10 @@ function LobbyPage() {
 									</div>
 									<div>
 										<p className="text-white font-medium">
-											{s.hostName}&apos;s Game
+											{t("lobby.sGame", s.hostName)}
 										</p>
 										<p className="text-[#71717A] text-sm">
-											{s.playerCount}/8 players &middot;{" "}
+											{t("lobby.players", s.playerCount, 17)} &middot;{" "}
 											<span
 												className={
 													s.phase === "lobby"
@@ -175,7 +177,9 @@ function LobbyPage() {
 														: "text-yellow-400"
 												}
 											>
-												{s.phase === "lobby" ? "Waiting" : "In Progress"}
+												{s.phase === "lobby"
+													? t("lobby.waiting")
+													: t("lobby.inProgress")}
 											</span>
 										</p>
 									</div>
@@ -190,7 +194,7 @@ function LobbyPage() {
 										className="flex items-center gap-2 px-3 py-2 bg-[#3F3F46] hover:bg-[#52525B] text-white rounded-lg text-sm font-medium transition-colors"
 									>
 										<LogIn className="w-4 h-4" />
-										Join
+										{t("lobby.join")}
 									</button>
 								)}
 							</div>

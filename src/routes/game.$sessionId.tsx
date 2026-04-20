@@ -18,6 +18,7 @@ import { QRCodeSVG } from "qrcode.react";
 import { useCallback, useState } from "react";
 import { CardBack, PlayingCard } from "#/components/PlayingCard";
 import { useSounds } from "#/hooks/use-sounds";
+import { useI18n } from "#/lib/i18n";
 import {
 	dealCardsFn,
 	dealerDrawFn,
@@ -41,6 +42,7 @@ export const Route = createFileRoute("/game/$sessionId")({
 function GamePage() {
 	const { sessionId } = Route.useLoaderData();
 	const navigate = useNavigate();
+	const { t } = useI18n();
 	const { play, muted, toggleMute } = useSounds();
 	const [view, setView] = useState<ClientGameView | null>(null);
 	const [betAmount, setBetAmount] = useState(50);
@@ -69,9 +71,9 @@ function GamePage() {
 			setView(data);
 			setError("");
 		} catch (e) {
-			setError(e instanceof Error ? e.message : "Failed to load game");
+			setError(e instanceof Error ? e.message : t("error.failedLoad"));
 		}
-	}, [sessionId, getPlayerId]);
+	}, [sessionId, getPlayerId, t]);
 
 	const [initialized, setInitialized] = useState(false);
 	if (!initialized && typeof window !== "undefined") {
@@ -93,7 +95,7 @@ function GamePage() {
 			await refreshView();
 		} catch (e) {
 			play("lose");
-			setError(e instanceof Error ? e.message : "Action failed");
+			setError(e instanceof Error ? e.message : t("error.actionFailed"));
 		} finally {
 			setLoading(false);
 		}
@@ -108,45 +110,44 @@ function GamePage() {
 			.filter((p) => !p.isDealer)
 			.every((p) => p.hasDrawn || p.hasStood) ?? false;
 
-	if (!view) {
-		return (
-			<div className="flex items-center justify-center min-h-[60vh]">
-				<div className="text-[#71717A]">Loading game...</div>
-			</div>
-		);
-	}
-
 	function formatHandType(
 		result: { handType: string; deng: number } | undefined,
 	): string {
 		if (!result) return "";
-		const labels: Record<string, string> = {
-			pok: "Pok",
-			tong: "Tong",
-			"sam-lueang": "Sam Lueang",
-			normal: "",
-		};
-		const label = labels[result.handType] ?? result.handType;
+		const key = `game.handType.${result.handType}` as const;
+		const label = t(key);
 		const parts: string[] = [];
 		if (label) parts.push(label);
-		if (result.deng > 1) parts.push(`${result.deng} Deng`);
+		if (result.deng > 1) parts.push(`${result.deng} ${t("game.deng")}`);
 		return parts.join(", ");
+	}
+
+	function phaseLabel(phase: string): string {
+		const key = `game.phase.${phase}` as const;
+		return t(key);
+	}
+
+	if (!view) {
+		return (
+			<div className="flex items-center justify-center min-h-[60vh]">
+				<div className="text-[#71717A]">{t("game.loading")}</div>
+			</div>
+		);
 	}
 
 	return (
 		<div className="max-w-6xl mx-auto space-y-6">
-			{/* Header Bar */}
 			<div className="flex items-center justify-between">
 				<div>
 					<h1 className="text-2xl font-bold text-white">
-						Round {view.roundNumber || "-"}
+						{t("game.round")} {view.roundNumber || "-"}
 					</h1>
 					<p className="text-[#A1A1AA] text-sm">
-						Phase:{" "}
-						<span className="text-white font-medium capitalize">
-							{view.phase}
+						{t("game.phase")}:{" "}
+						<span className="text-white font-medium">
+							{phaseLabel(view.phase)}
 						</span>{" "}
-						&middot; {view.players.length} players
+						&middot; {view.players.length} {t("game.players")}
 					</p>
 				</div>
 				<div className="flex gap-2">
@@ -154,7 +155,7 @@ function GamePage() {
 						type="button"
 						onClick={toggleMute}
 						className="p-2 bg-[#27272A] border border-[#3F3F46] rounded-lg hover:bg-[#3F3F46] text-[#A1A1AA] transition-colors"
-						title={muted ? "Unmute" : "Mute"}
+						title={muted ? t("game.unmute") : t("game.mute")}
 					>
 						{muted ? (
 							<VolumeX className="w-4 h-4" />
@@ -166,7 +167,7 @@ function GamePage() {
 						type="button"
 						onClick={() => refreshView()}
 						className="p-2 bg-[#27272A] border border-[#3F3F46] rounded-lg hover:bg-[#3F3F46] text-[#A1A1AA] transition-colors"
-						title="Refresh"
+						title={t("game.refresh")}
 					>
 						<RotateCcw className="w-4 h-4" />
 					</button>
@@ -174,7 +175,7 @@ function GamePage() {
 						type="button"
 						onClick={() => navigate({ to: "/" })}
 						className="p-2 bg-[#27272A] border border-[#3F3F46] rounded-lg hover:bg-[#3F3F46] text-[#A1A1AA] transition-colors"
-						title="Leave"
+						title={t("game.leave")}
 					>
 						<DoorOpen className="w-4 h-4" />
 					</button>
@@ -187,11 +188,10 @@ function GamePage() {
 				</div>
 			)}
 
-			{/* Scoreboard */}
 			<div className="bg-[#27272A] border border-[#3F3F46] rounded-xl p-4">
 				<h3 className="text-sm font-semibold text-[#A1A1AA] mb-3 flex items-center gap-2">
 					<Users className="w-4 h-4" />
-					Players & Balances
+					{t("game.playersBalances")}
 				</h3>
 				<div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
 					{view.players.map((p) => (
@@ -207,7 +207,7 @@ function GamePage() {
 								{p.isDealer && <Crown className="w-3 h-3 text-yellow-400" />}
 								<span className="text-white text-sm font-medium truncate">
 									{p.name}
-									{p.id === myPlayerId && " (You)"}
+									{p.id === myPlayerId && ` ${t("game.you")}`}
 								</span>
 							</div>
 							<div
@@ -221,19 +221,20 @@ function GamePage() {
 								{view.cumulativeBalances[p.id] ?? 0}
 							</div>
 							{view.phase !== "lobby" && !p.isDealer && (
-								<div className="text-xs text-[#71717A] mt-1">Bet: {p.bet}</div>
+								<div className="text-xs text-[#71717A] mt-1">
+									{t("game.bet")}: {p.bet}
+								</div>
 							)}
 						</div>
 					))}
 				</div>
 			</div>
 
-			{/* Dealer's Hand */}
 			{view.phase !== "lobby" && view.phase !== "betting" && (
 				<div className="bg-[#27272A] border border-[#3F3F46] rounded-xl p-4">
 					<h3 className="text-sm font-semibold text-[#A1A1AA] mb-3 flex items-center gap-2">
 						<Crown className="w-4 h-4 text-yellow-400" />
-						Dealer&apos;s Hand
+						{t("game.dealerHand")}
 					</h3>
 					<div className="flex gap-2">
 						{(() => {
@@ -259,7 +260,7 @@ function GamePage() {
 							return (
 								<div className="mt-2 text-sm">
 									<span className="text-yellow-400 font-medium">
-										Taem: {dealer.result.score}
+										{t("game.taem")}: {dealer.result.score}
 									</span>
 									{formatHandType(dealer.result) && (
 										<span className="ml-2 text-purple-400">
@@ -272,11 +273,10 @@ function GamePage() {
 				</div>
 			)}
 
-			{/* My Hand (non-dealer) */}
 			{!amDealer && view.phase !== "lobby" && view.phase !== "betting" && (
 				<div className="bg-[#27272A] border border-blue-500/50 rounded-xl p-4">
 					<h3 className="text-sm font-semibold text-blue-400 mb-3">
-						Your Hand
+						{t("game.yourHand")}
 					</h3>
 					<div className="flex gap-2">
 						{view.myCards.map((card, i) => (
@@ -289,7 +289,7 @@ function GamePage() {
 					{view.myResult && (
 						<div className="mt-2 text-sm">
 							<span className="text-blue-400 font-medium">
-								Taem: {view.myResult.score}
+								{t("game.taem")}: {view.myResult.score}
 							</span>
 							{formatHandType(view.myResult) && (
 								<span className="ml-2 text-purple-400">
@@ -311,7 +311,6 @@ function GamePage() {
 				</div>
 			)}
 
-			{/* Other Players Hands (during reveal) */}
 			{view.phase === "reveal" && (
 				<div className="grid grid-cols-1 md:grid-cols-2 gap-4">
 					{view.players
@@ -338,7 +337,9 @@ function GamePage() {
 								</div>
 								{p.result && (
 									<div className="mt-2 text-sm">
-										<span className="text-white">Taem: {p.result.score}</span>
+										<span className="text-white">
+											{t("game.taem")}: {p.result.score}
+										</span>
 										{formatHandType(p.result) && (
 											<span className="ml-2 text-purple-400">
 												{formatHandType(p.result)}
@@ -361,9 +362,10 @@ function GamePage() {
 				</div>
 			)}
 
-			{/* Action Buttons */}
 			<div className="bg-[#27272A] border border-[#3F3F46] rounded-xl p-4">
-				<h3 className="text-sm font-semibold text-[#A1A1AA] mb-3">Actions</h3>
+				<h3 className="text-sm font-semibold text-[#A1A1AA] mb-3">
+					{t("game.actions")}
+				</h3>
 				<div className="flex flex-wrap gap-3 items-center">
 					{view.phase === "lobby" && isHost && (
 						<button
@@ -381,21 +383,19 @@ function GamePage() {
 							className="flex items-center gap-2 px-4 py-2 bg-green-600 hover:bg-green-700 disabled:opacity-50 text-white rounded-lg font-medium transition-colors"
 						>
 							<Play className="w-4 h-4" />
-							Start Round
+							{t("game.startRound")}
 						</button>
 					)}
 
 					{view.phase === "lobby" && !isHost && (
-						<p className="text-[#71717A] text-sm">
-							Waiting for host to start...
-						</p>
+						<p className="text-[#71717A] text-sm">{t("game.waitingHost")}</p>
 					)}
 
 					{view.phase === "betting" && !amDealer && (
 						<>
 							<div className="flex items-center gap-2">
 								<label htmlFor="betInput" className="text-[#A1A1AA] text-sm">
-									Bet:
+									{t("game.bet")}:
 								</label>
 								<input
 									id="betInput"
@@ -426,7 +426,7 @@ function GamePage() {
 								className="flex items-center gap-2 px-4 py-2 bg-yellow-600 hover:bg-yellow-700 disabled:opacity-50 text-white rounded-lg font-medium transition-colors"
 							>
 								<HandCoins className="w-4 h-4" />
-								Place Bet
+								{t("game.placeBet")}
 							</button>
 						</>
 					)}
@@ -438,14 +438,16 @@ function GamePage() {
 							onClick={() =>
 								handleAction(
 									() =>
-										dealCardsFn({ data: { sessionId, playerId: myPlayerId } }),
+										dealCardsFn({
+											data: { sessionId, playerId: myPlayerId },
+										}),
 									"deal",
 								)
 							}
 							className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white rounded-lg font-medium transition-colors"
 						>
 							<Layers className="w-4 h-4" />
-							Deal Cards
+							{t("game.dealCards")}
 						</button>
 					)}
 
@@ -470,7 +472,7 @@ function GamePage() {
 									className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white rounded-lg font-medium transition-colors"
 								>
 									<ArrowDown className="w-4 h-4" />
-									Draw
+									{t("game.draw")}
 								</button>
 								<button
 									type="button"
@@ -478,14 +480,16 @@ function GamePage() {
 									onClick={() =>
 										handleAction(
 											() =>
-												standFn({ data: { sessionId, playerId: myPlayerId } }),
+												standFn({
+													data: { sessionId, playerId: myPlayerId },
+												}),
 											"click",
 										)
 									}
 									className="flex items-center gap-2 px-4 py-2 bg-[#3F3F46] hover:bg-[#52525B] disabled:opacity-50 text-white rounded-lg font-medium transition-colors"
 								>
 									<Square className="w-4 h-4" />
-									Stand
+									{t("game.stand")}
 								</button>
 							</>
 						)}
@@ -511,7 +515,7 @@ function GamePage() {
 									className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white rounded-lg font-medium transition-colors"
 								>
 									<ArrowDown className="w-4 h-4" />
-									Draw
+									{t("game.draw")}
 								</button>
 								<button
 									type="button"
@@ -519,14 +523,16 @@ function GamePage() {
 									onClick={() =>
 										handleAction(
 											() =>
-												standFn({ data: { sessionId, playerId: myPlayerId } }),
+												standFn({
+													data: { sessionId, playerId: myPlayerId },
+												}),
 											"click",
 										)
 									}
 									className="flex items-center gap-2 px-4 py-2 bg-[#3F3F46] hover:bg-[#52525B] disabled:opacity-50 text-white rounded-lg font-medium transition-colors"
 								>
 									<Square className="w-4 h-4" />
-									Stand
+									{t("game.stand")}
 								</button>
 							</>
 						)}
@@ -536,14 +542,12 @@ function GamePage() {
 						me &&
 						(me.hasDrawn || me.hasStood) && (
 							<p className="text-[#71717A] text-sm">
-								Waiting for other players and dealer...
+								{t("game.waitingOthers")}
 							</p>
 						)}
 
 					{view.phase === "playing" && amDealer && !allPlayersActed && (
-						<p className="text-[#71717A] text-sm">
-							Waiting for players to act...
-						</p>
+						<p className="text-[#71717A] text-sm">{t("game.waitingPlayers")}</p>
 					)}
 
 					{view.phase === "reveal" && isHost && (
@@ -563,7 +567,7 @@ function GamePage() {
 								className="flex items-center gap-2 px-4 py-2 bg-green-600 hover:bg-green-700 disabled:opacity-50 text-white rounded-lg font-medium transition-colors"
 							>
 								<Play className="w-4 h-4" />
-								Next Round
+								{t("game.nextRound")}
 							</button>
 							<button
 								type="button"
@@ -578,7 +582,7 @@ function GamePage() {
 										play("deal");
 									} catch (e) {
 										setError(
-											e instanceof Error ? e.message : "Failed to end session",
+											e instanceof Error ? e.message : t("error.failedEnd"),
 										);
 									} finally {
 										setLoading(false);
@@ -587,25 +591,23 @@ function GamePage() {
 								className="flex items-center gap-2 px-4 py-2 bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white rounded-lg font-medium transition-colors"
 							>
 								<DoorOpen className="w-4 h-4" />
-								End Session &amp; Settle
+								{t("game.endSession")}
 							</button>
 						</>
 					)}
 
 					{view.phase === "reveal" && !isHost && (
-						<p className="text-[#71717A] text-sm">
-							Waiting for host to start next round or end session...
-						</p>
+						<p className="text-[#71717A] text-sm">{t("game.waitingNext")}</p>
 					)}
 				</div>
 			</div>
 
-			{/* Settlement with Manual Payment Resolution */}
 			{settlement && (
 				<div className="bg-[#27272A] border border-[#3F3F46] rounded-xl p-6 space-y-6">
-					<h2 className="text-xl font-bold text-white">Session Settlement</h2>
+					<h2 className="text-xl font-bold text-white">
+						{t("settlement.title")}
+					</h2>
 
-					{/* Balance Summary */}
 					<div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
 						{Object.entries(settlement).map(([pid, info]) => (
 							<div
@@ -628,7 +630,9 @@ function GamePage() {
 														: "bg-yellow-500/20 text-yellow-400"
 											}`}
 										>
-											{paymentStatus[pid]}
+											{paymentStatus[pid] === "confirmed"
+												? t("settlement.confirmed")
+												: t("settlement.disputed")}
 										</span>
 									)}
 								</div>
@@ -642,21 +646,19 @@ function GamePage() {
 								</p>
 								{info.balance < 0 && paymentStatus[pid] !== "confirmed" && (
 									<p className="text-xs text-[#71717A] mt-1">
-										Owes {Math.abs(info.balance)} THB to dealer
+										{t("settlement.owesDealer", Math.abs(info.balance))}
 									</p>
 								)}
 							</div>
 						))}
 					</div>
 
-					{/* Manual Payment Resolution */}
 					<div className="border-t border-[#3F3F46] pt-6">
 						<h3 className="text-lg font-semibold text-white mb-2">
-							Payment Resolution
+							{t("settlement.paymentResolution")}
 						</h3>
 						<p className="text-[#A1A1AA] text-sm mb-4">
-							After sending/receiving payment via PromptPay, confirm receipt
-							below.
+							{t("settlement.paymentHint")}
 						</p>
 
 						<div className="space-y-3">
@@ -672,18 +674,18 @@ function GamePage() {
 												{info.name}
 											</p>
 											<p className="text-red-400 text-sm">
-												Owes {Math.abs(info.balance)} THB
+												{t("settlement.owesDealer", Math.abs(info.balance))}
 											</p>
 										</div>
 										{paymentStatus[pid] === "confirmed" ? (
 											<span className="flex items-center gap-1 text-green-400 text-sm">
 												<CheckCircle className="w-4 h-4" />
-												Confirmed
+												{t("settlement.confirmed")}
 											</span>
 										) : paymentStatus[pid] === "disputed" ? (
 											<span className="flex items-center gap-1 text-red-400 text-sm">
 												<XCircle className="w-4 h-4" />
-												Disputed
+												{t("settlement.disputed")}
 											</span>
 										) : (
 											<div className="flex gap-2">
@@ -699,7 +701,7 @@ function GamePage() {
 													className="flex items-center gap-1 px-3 py-1.5 bg-green-600 hover:bg-green-700 text-white rounded-lg text-sm font-medium transition-colors"
 												>
 													<CheckCircle className="w-3.5 h-3.5" />
-													Received
+													{t("settlement.received")}
 												</button>
 												<button
 													type="button"
@@ -713,7 +715,7 @@ function GamePage() {
 													className="flex items-center gap-1 px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white rounded-lg text-sm font-medium transition-colors"
 												>
 													<XCircle className="w-3.5 h-3.5" />
-													Not Received
+													{t("settlement.notReceived")}
 												</button>
 											</div>
 										)}
@@ -724,8 +726,7 @@ function GamePage() {
 						{Object.values(paymentStatus).some((s) => s === "disputed") && (
 							<div className="mt-4 p-3 bg-red-500/10 border border-red-500/30 rounded-lg">
 								<p className="text-red-400 text-sm">
-									Some payments are disputed. Please resolve offline and
-									re-confirm.
+									{t("settlement.disputedMsg")}
 								</p>
 								<button
 									type="button"
@@ -742,16 +743,15 @@ function GamePage() {
 									}}
 									className="mt-2 px-3 py-1.5 bg-[#3F3F46] hover:bg-[#52525B] text-white rounded-lg text-sm transition-colors"
 								>
-									Reset Disputed
+									{t("settlement.resetDisputed")}
 								</button>
 							</div>
 						)}
 					</div>
 
-					{/* PromptPay QR */}
 					<div className="border-t border-[#3F3F46] pt-6">
 						<h3 className="text-lg font-semibold text-white mb-4">
-							Generate PromptPay QR
+							{t("settlement.generateQr")}
 						</h3>
 						<div className="flex flex-col sm:flex-row gap-4 items-start">
 							<div className="space-y-3 flex-1">
@@ -760,14 +760,14 @@ function GamePage() {
 										htmlFor="promptPayInput"
 										className="block text-sm text-[#A1A1AA] mb-1"
 									>
-										Recipient PromptPay ID (Phone or Citizen ID)
+										{t("settlement.recipientLabel")}
 									</label>
 									<input
 										id="promptPayInput"
 										type="text"
 										value={promptPayId}
 										onChange={(e) => setPromptPayId(e.target.value)}
-										placeholder="0812345678 or 1234567890123"
+										placeholder="0812345678 / 1234567890123"
 										className="w-full px-3 py-2 bg-[#18181B] border border-[#3F3F46] rounded-lg text-white placeholder-[#71717A] focus:outline-none focus:border-blue-500"
 									/>
 								</div>
@@ -794,13 +794,17 @@ function GamePage() {
 														setError(
 															e instanceof Error
 																? e.message
-																: "Failed to generate QR",
+																: t("error.failedQr"),
 														);
 													}
 												}}
 												className="block w-full text-left px-3 py-2 bg-[#3F3F46] hover:bg-[#52525B] disabled:opacity-50 rounded-lg text-sm text-white transition-colors"
 											>
-												QR for {info.name} ({Math.abs(info.balance)} THB)
+												{t(
+													"settlement.qrFor",
+													info.name,
+													Math.abs(info.balance),
+												)}
 											</button>
 										))}
 								</div>
@@ -809,7 +813,7 @@ function GamePage() {
 								<div className="bg-white p-4 rounded-xl">
 									<QRCodeSVG value={qrPayload} size={200} />
 									<p className="text-black text-xs text-center mt-2">
-										Scan to pay with any banking app
+										{t("settlement.scanToPay")}
 									</p>
 								</div>
 							)}
@@ -821,16 +825,15 @@ function GamePage() {
 						onClick={() => navigate({ to: "/" })}
 						className="px-4 py-2 bg-[#3F3F46] hover:bg-[#52525B] text-white rounded-lg font-medium transition-colors"
 					>
-						Back to Lobby
+						{t("settlement.backToLobby")}
 					</button>
 				</div>
 			)}
 
-			{/* Round History */}
 			{view.roundHistory.length > 0 && (
 				<div className="bg-[#27272A] border border-[#3F3F46] rounded-xl p-4">
 					<h3 className="text-sm font-semibold text-[#A1A1AA] mb-3">
-						Round History
+						{t("history.title")}
 					</h3>
 					<div className="space-y-2">
 						{view.roundHistory.map((round) => (
@@ -840,11 +843,14 @@ function GamePage() {
 							>
 								<div className="flex items-center justify-between mb-1">
 									<p className="text-white text-sm font-medium">
-										Round {round.roundNumber}
+										{t("game.round")} {round.roundNumber}
 									</p>
 									<p className="text-yellow-400 text-xs">
-										Dealer: {round.dealerTaem} taem
-										{round.dealerDeng > 1 ? `, ${round.dealerDeng} deng` : ""}
+										{t("game.dealerHand").replace("'s", "")}: {round.dealerTaem}{" "}
+										{t("game.taem").toLowerCase()}
+										{round.dealerDeng > 1
+											? `, ${round.dealerDeng} ${t("game.deng").toLowerCase()}`
+											: ""}
 									</p>
 								</div>
 								<div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
@@ -860,8 +866,11 @@ function GamePage() {
 												{r.netAmount}
 											</span>
 											<span className="text-[#71717A] ml-1">
-												(taem:{r.taem}
-												{r.deng > 1 ? `, ${r.deng}d` : ""})
+												({t("game.taem").toLowerCase()}:{r.taem}
+												{r.deng > 1
+													? `, ${r.deng}${t("game.deng").toLowerCase().charAt(0)}`
+													: ""}
+												)
 											</span>
 										</div>
 									))}

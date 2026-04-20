@@ -5,6 +5,7 @@ import {
 	Outlet,
 	Scripts,
 } from "@tanstack/react-router";
+import { I18nProvider } from "#/lib/i18n";
 import { Sidebar } from "../components/Sidebar";
 import appCss from "../styles.css?url";
 
@@ -47,11 +48,13 @@ function RootDocument({ children }: { children: React.ReactNode }) {
 
 function RootComponent() {
 	return (
-		<div className="flex min-h-screen">
-			<Sidebar />
-			<main className="flex-1 p-6 overflow-auto">
-				<Outlet />
-			</main>
-		</div>
+		<I18nProvider>
+			<div className="flex min-h-screen">
+				<Sidebar />
+				<main className="flex-1 p-6 overflow-auto">
+					<Outlet />
+				</main>
+			</div>
+		</I18nProvider>
 	);
 }
