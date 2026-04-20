@@ -18,3 +18,36 @@ body {
 
 .suit-red { color: #EF4444; }
 .suit-black { color: #FAFAFA; }
+
+@keyframes deal-in {
+  from {
+    transform: translateY(-80px) scale(0.5) rotate(5deg);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0) scale(1) rotate(0deg);
+    opacity: 1;
+  }
+}
+
+@keyframes reveal-pop {
+  0% { transform: scale(0.7) rotateY(180deg); opacity: 0.3; }
+  60% { transform: scale(1.08) rotateY(0deg); opacity: 1; }
+  100% { transform: scale(1) rotateY(0deg); opacity: 1; }
+}
+
+@keyframes draw-in {
+  from {
+    transform: translateX(80px) rotate(10deg);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0) rotate(0deg);
+    opacity: 1;
+  }
+}
+
+@keyframes pulse-glow {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(59, 130, 246, 0); }
+  50% { box-shadow: 0 0 12px 4px rgba(59, 130, 246, 0.4); }
+}

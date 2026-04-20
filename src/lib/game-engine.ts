@@ -1,6 +1,7 @@
 import type {
 	Card,
 	ClientGameView,
+	GameConfig,
 	GameSession,
 	HandResult,
 	HandType,
@@ -48,8 +49,6 @@ function shuffleDeck(deck: Card[]): Card[] {
 	return shuffled;
 }
 
-// ── Card Value ──────────────────────────────────────────────
-// A=1, 2-9=face value, 10/J/Q/K=10 (mod 10 so 10 and 0 are equivalent)
 function cardValue(card: Card): number {
 	if (card.rank === "A") return 1;
 	if (["J", "Q", "K", "10"].includes(card.rank)) return 10;
@@ -98,42 +97,34 @@ function isFaceCard(card: Card): boolean {
 	return ["J", "Q", "K"].includes(card.rank);
 }
 
-function isConsecutive(cards: Card[]): boolean {
+function isConsecutive(cards: Card[], allowAceHigh = false): boolean {
 	if (cards.length !== 3) return false;
 	const sorted = cards.map((c) => RANK_ORDER[c.rank]).sort((a, b) => a - b);
-	for (let i = 1; i < sorted.length; i++) {
-		if (sorted[i]! - sorted[i - 1]! !== 1) return false;
-	}
-	return true;
+	if (sorted[1]! - sorted[0]! === 1 && sorted[2]! - sorted[1]! === 1)
+		return true;
+	if (allowAceHigh && sorted[0] === 1 && sorted[1] === 12 && sorted[2] === 13)
+		return true;
+	return false;
 }
 
-// ── Hand Evaluation (per Wikipedia rules) ───────────────────
-//
-// Hand types in order: Pok > Tong > Sam Lueang > Normal
-// Deng (multiplier):
-//   - 2 cards: pair or flush = 2 deng (song deng), otherwise 1 deng
-//   - 3 cards: flush = 3 deng (sam deng), pair = 2 deng, straight = 3 deng (riang),
-//              straight flush = 5 deng (riang plus), otherwise 1 deng
-//   - Tong = 5 deng, Sam Lueang = 3 deng
-
-export function evaluateHand(cards: Card[]): HandResult {
+export function evaluateHand(
+	cards: Card[],
+	options?: { allowAceHighStraight?: boolean },
+): HandResult {
 	const score = taem(cards);
+	const allowAce = options?.allowAceHighStraight ?? false;
 
-	// ── 2-card hands ──
 	if (cards.length === 2) {
 		const isPok = score >= 8;
 		if (isPok && isPair(cards)) {
-			// Pok deng: pok + pair
 			return { score, handType: "pok", deng: 2, cards };
 		}
 		if (isPok && isSameSuit(cards)) {
-			// Pok deng: pok + flush
 			return { score, handType: "pok", deng: 2, cards };
 		}
 		if (isPok) {
 			return { score, handType: "pok", deng: 1, cards };
 		}
-		// Non-pok 2-card hands: song deng if pair or flush
 		if (isPair(cards)) {
 			return { score, handType: "normal", deng: 2, cards };
 		}
@@ -143,21 +134,20 @@ export function evaluateHand(cards: Card[]): HandResult {
 		return { score, handType: "normal", deng: 1, cards };
 	}
 
-	// ── 3-card hands ──
 	if (isThreeOfAKind(cards)) {
 		return { score, handType: "tong", deng: 5, cards };
 	}
-	if (isConsecutive(cards) && isSameSuit(cards)) {
-		return { score, handType: "normal", deng: 5, cards }; // straight flush (riang plus)
+	if (isConsecutive(cards, allowAce) && isSameSuit(cards)) {
+		return { score, handType: "normal", deng: 5, cards };
 	}
 	if (cards.every(isFaceCard)) {
 		return { score, handType: "sam-lueang", deng: 3, cards };
 	}
-	if (isConsecutive(cards)) {
-		return { score, handType: "normal", deng: 3, cards }; // straight (riang)
+	if (isConsecutive(cards, allowAce)) {
+		return { score, handType: "normal", deng: 3, cards };
 	}
 	if (isSameSuit(cards)) {
-		return { score, handType: "normal", deng: 3, cards }; // flush (sam deng)
+		return { score, handType: "normal", deng: 3, cards };
 	}
 	if (isPair(cards)) {
 		return { score, handType: "normal", deng: 2, cards };
@@ -165,7 +155,6 @@ export function evaluateHand(cards: Card[]): HandResult {
 	return { score, handType: "normal", deng: 1, cards };
 }
 
-// ── Hand Type Ranking ───────────────────────────────────────
 const HAND_TYPE_RANK: Record<HandType, number> = {
 	pok: 3,
 	tong: 2,
@@ -173,7 +162,6 @@ const HAND_TYPE_RANK: Record<HandType, number> = {
 	normal: 0,
 };
 
-/** Compare two hands per Wikipedia rules */
 export function compareHands(
 	playerHand: HandResult,
 	dealerHand: HandResult,
@@ -182,7 +170,6 @@ export function compareHands(
 	const pType = HAND_TYPE_RANK[playerHand.handType];
 	const dType = HAND_TYPE_RANK[dealerHand.handType];
 
-	// Special: Tong beats Sam Lueang, payout = 2x bet (5-3 deng)
 	if (playerHand.handType === "tong" && dealerHand.handType === "sam-lueang") {
 		return { winner: "player", netAmount: bet * 2 };
 	}
@@ -190,7 +177,6 @@ export function compareHands(
 		return { winner: "dealer", netAmount: -bet * 2 };
 	}
 
-	// 1. Compare hand types
 	if (pType !== dType) {
 		const playerWins = pType > dType;
 		const winnerHand = playerWins ? playerHand : dealerHand;
@@ -200,7 +186,6 @@ export function compareHands(
 		};
 	}
 
-	// 2. Same hand type: compare taem
 	if (playerHand.score !== dealerHand.score) {
 		const playerWins = playerHand.score > dealerHand.score;
 		const winnerHand = playerWins ? playerHand : dealerHand;
@@ -210,7 +195,6 @@ export function compareHands(
 		};
 	}
 
-	// 3. Same type and taem: compare deng
 	if (playerHand.deng !== dealerHand.deng) {
 		const playerWins = playerHand.deng > dealerHand.deng;
 		const dengDiff = Math.abs(playerHand.deng - dealerHand.deng);
@@ -220,11 +204,9 @@ export function compareHands(
 		};
 	}
 
-	// 4. Complete tie: bet returned (net 0)
 	return { winner: "tie", netAmount: 0 };
 }
 
-// ── In-Memory Session Store ─────────────────────────────────
 const sessions = new Map<string, GameSession>();
 const sessionDecks = new Map<string, Card[]>();
 
@@ -234,7 +216,14 @@ function generateId(): string {
 	return Array.from(arr, (b) => b.toString(16).padStart(2, "0")).join("");
 }
 
-export function createSession(hostName: string): GameSession {
+function bump(session: GameSession): void {
+	session.version++;
+}
+
+export function createSession(
+	hostName: string,
+	config?: Partial<GameConfig>,
+): GameSession {
 	const hostId = generateId();
 	const sessionId = generateId();
 	const session: GameSession = {
@@ -245,6 +234,8 @@ export function createSession(hostName: string): GameSession {
 		currentRound: null,
 		roundHistory: [],
 		phase: "lobby",
+		config: { allowAceHighStraight: config?.allowAceHighStraight ?? false },
+		version: 1,
 		createdAt: Date.now(),
 	};
 	sessions.set(sessionId, session);
@@ -263,6 +254,7 @@ export function joinSession(
 
 	const playerId = generateId();
 	session.players.push({ id: playerId, name: playerName, isDealer: false });
+	bump(session);
 	return { session, playerId };
 }
 
@@ -326,6 +318,7 @@ export function startBetting(sessionId: string, playerId: string): void {
 		dealerHand: dealerPlayer,
 	};
 	session.phase = "betting";
+	bump(session);
 }
 
 export function placeBet(
@@ -344,6 +337,7 @@ export function placeBet(
 	if (!player) throw new Error("Player not in round");
 	if (amount <= 0 || amount > 1000) throw new Error("Invalid bet amount");
 	player.bet = amount;
+	bump(session);
 }
 
 export function dealCards(sessionId: string, playerId: string): void {
@@ -374,29 +368,32 @@ export function dealCards(sessionId: string, playerId: string): void {
 
 	session.currentRound.phase = "playing";
 	session.phase = "playing";
+	bump(session);
 
-	// Dealer Pok: immediate resolution
-	const dealerResult = evaluateHand(session.currentRound.dealerHand!.cards);
+	const evalOpts = {
+		allowAceHighStraight: session.config.allowAceHighStraight,
+	};
+
+	const dealerResult = evaluateHand(
+		session.currentRound.dealerHand!.cards,
+		evalOpts,
+	);
 	if (dealerResult.handType === "pok") {
 		resolveRound(sessionId);
 		return;
 	}
 
-	// Check if any player has Pok (they must reveal and cannot draw)
 	const anyPlayerPok = session.currentRound.players.some((p) => {
-		const r = evaluateHand(p.cards);
+		const r = evaluateHand(p.cards, evalOpts);
 		return r.handType === "pok";
 	});
 	if (anyPlayerPok) {
-		// Players with Pok stand automatically; those without still decide
 		for (const p of session.currentRound.players) {
-			const r = evaluateHand(p.cards);
+			const r = evaluateHand(p.cards, evalOpts);
 			if (r.handType === "pok") {
-				p.hasStood = true; // Pok players cannot draw
+				p.hasStood = true;
 			}
 		}
-		// Don't auto-resolve yet - non-pok players still get to act
-		// But if ALL players have pok, resolve now
 		const allPok = session.currentRound.players.every((p) => p.hasStood);
 		if (allPok) {
 			resolveRound(sessionId);
@@ -417,8 +414,9 @@ export function drawCard(sessionId: string, playerId: string): Card {
 	if (player.hasDrawn || player.hasStood) throw new Error("Already acted");
 	if (player.cards.length >= 3) throw new Error("Max 3 cards");
 
-	// Check if player has Pok (cannot draw)
-	const hand = evaluateHand(player.cards);
+	const hand = evaluateHand(player.cards, {
+		allowAceHighStraight: session.config.allowAceHighStraight,
+	});
 	if (hand.handType === "pok") throw new Error("Pok hand cannot draw");
 
 	const deck = sessionDecks.get(sessionId);
@@ -427,6 +425,7 @@ export function drawCard(sessionId: string, playerId: string): Card {
 	const card = deck.shift()!;
 	player.cards.push(card);
 	player.hasDrawn = true;
+	bump(session);
 
 	checkAllPlayersActed(sessionId);
 	return card;
@@ -446,6 +445,7 @@ export function stand(sessionId: string, playerId: string): void {
 	if (player.hasStood) throw new Error("Already stood");
 
 	player.hasStood = true;
+	bump(session);
 	checkAllPlayersActed(sessionId);
 }
 
@@ -469,6 +469,7 @@ export function dealerDraw(sessionId: string, playerId: string): Card {
 	const card = deck.shift()!;
 	session.currentRound.dealerHand!.cards.push(card);
 	session.currentRound.dealerHand!.hasDrawn = true;
+	bump(session);
 
 	return card;
 }
@@ -492,13 +493,20 @@ export function resolveRound(sessionId: string): void {
 	const session = sessions.get(sessionId);
 	if (!session?.currentRound) return;
 
-	const dealerResult = evaluateHand(session.currentRound.dealerHand!.cards);
+	const evalOpts = {
+		allowAceHighStraight: session.config.allowAceHighStraight,
+	};
+
+	const dealerResult = evaluateHand(
+		session.currentRound.dealerHand!.cards,
+		evalOpts,
+	);
 	session.currentRound.dealerHand!.result = dealerResult;
 
 	const roundResults: RoundSummary["results"] = [];
 
 	for (const player of session.currentRound.players) {
-		const playerResult = evaluateHand(player.cards);
+		const playerResult = evaluateHand(player.cards, evalOpts);
 		player.result = playerResult;
 
 		const comparison = compareHands(playerResult, dealerResult, player.bet);
@@ -526,6 +534,7 @@ export function resolveRound(sessionId: string): void {
 
 	session.currentRound.phase = "reveal";
 	session.phase = "reveal";
+	bump(session);
 }
 
 export function endSession(
@@ -551,6 +560,7 @@ export function endSession(
 	}
 
 	session.phase = "ended";
+	bump(session);
 	return balances;
 }
 
@@ -610,6 +620,7 @@ export function getClientView(
 	return {
 		sessionId,
 		phase: session.phase,
+		version: session.version,
 		players,
 		myCards: myData?.cards ?? [],
 		myResult: isReveal ? myData?.result : undefined,

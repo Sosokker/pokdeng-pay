@@ -136,6 +136,50 @@ describe("evaluateHand", () => {
 			expect(evaluateHand([c("7", "hearts"), c("8", "spades")]).score).toBe(5);
 		});
 	});
+
+	describe("Ace-high straights (configurable)", () => {
+		it("Q-K-A is NOT a straight by default", () => {
+			const hand = [c("Q", "hearts"), c("K", "diamonds"), c("A", "clubs")];
+			const result = evaluateHand(hand);
+			expect(result.handType).toBe("normal");
+			expect(result.deng).toBe(1);
+		});
+
+		it("Q-K-A IS a straight when allowAceHighStraight=true", () => {
+			const hand = [c("Q", "hearts"), c("K", "diamonds"), c("A", "clubs")];
+			const result = evaluateHand(hand, { allowAceHighStraight: true });
+			expect(result.handType).toBe("normal");
+			expect(result.deng).toBe(3);
+		});
+
+		it("Q-K-A straight flush when allowAceHighStraight=true", () => {
+			const hand = [c("Q", "hearts"), c("K", "hearts"), c("A", "hearts")];
+			const result = evaluateHand(hand, { allowAceHighStraight: true });
+			expect(result.handType).toBe("normal");
+			expect(result.deng).toBe(5);
+		});
+
+		it("K-A-2 is NOT a straight even with allowAceHighStraight", () => {
+			const hand = [c("K", "hearts"), c("A", "diamonds"), c("2", "clubs")];
+			const result = evaluateHand(hand, { allowAceHighStraight: true });
+			expect(result.handType).toBe("normal");
+			expect(result.deng).toBe(1);
+		});
+
+		it("A-2-3 is always a straight (A-low)", () => {
+			const hand = [c("A", "hearts"), c("2", "diamonds"), c("3", "clubs")];
+			const result = evaluateHand(hand);
+			expect(result.handType).toBe("normal");
+			expect(result.deng).toBe(3);
+		});
+
+		it("A-2-3 straight flush", () => {
+			const hand = [c("A", "hearts"), c("2", "hearts"), c("3", "hearts")];
+			const result = evaluateHand(hand);
+			expect(result.handType).toBe("normal");
+			expect(result.deng).toBe(5);
+		});
+	});
 });
 
 describe("compareHands", () => {

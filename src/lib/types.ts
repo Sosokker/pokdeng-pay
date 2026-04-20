@@ -34,6 +34,8 @@ export interface Player {
 	id: string;
 	name: string;
 	isDealer: boolean;
+	/** PromptPay phone-number or Citizen-ID for this player in this session */
+	promptPayId?: string;
 }
 
 export interface PlayerInRound {
@@ -64,7 +66,10 @@ export interface GameSession {
 	currentRound: GameRound | null;
 	roundHistory: RoundSummary[];
 	phase: SessionPhase;
+	config: GameConfig;
+	version: number;
 	createdAt: number;
+	updatedAt: number;
 }
 
 export interface RoundSummary {
@@ -87,6 +92,7 @@ export interface RoundSummary {
 export interface ClientGameView {
 	sessionId: string;
 	phase: SessionPhase;
+	version: number;
 	players: Array<{
 		id: string;
 		name: string;
@@ -98,15 +104,23 @@ export interface ClientGameView {
 		result?: HandResult;
 		netAmount?: number;
 		bet: number;
+		promptPayId?: string;
+		connected?: boolean;
 	}>;
 	myCards: Card[];
 	myResult?: HandResult;
 	roundNumber: number;
 	roundHistory: RoundSummary[];
 	cumulativeBalances: Record<string, number>;
+	/** Map of playerId → their PromptPay ID for payment QR generation */
+	playerPromptPayIds: Record<string, string>;
 }
 
 export interface PromptPayConfig {
 	targetId: string;
 	amount: number;
+}
+
+export interface GameConfig {
+	allowAceHighStraight: boolean;
 }

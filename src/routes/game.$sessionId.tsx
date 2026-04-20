@@ -7,17 +7,22 @@ import {
 	HandCoins,
 	Layers,
 	Play,
+	QrCode,
 	RotateCcw,
 	Square,
 	Users,
 	Volume2,
 	VolumeX,
+	Wallet,
+	Wifi,
+	WifiOff,
 	XCircle,
 } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { CardBack, PlayingCard } from "#/components/PlayingCard";
 import { useSounds } from "#/hooks/use-sounds";
+import { useAuth } from "#/lib/auth";
 import { useI18n } from "#/lib/i18n";
 import {
 	dealCardsFn,
@@ -26,7 +31,9 @@ import {
 	endSessionFn,
 	generateQrPayloadFn,
 	getGameViewFn,
+	heartbeatFn,
 	placeBetFn,
+	setPromptPayIdFn,
 	standFn,
 	startBettingFn,
 } from "#/lib/server-fns";
@@ -39,11 +46,28 @@ export const Route = createFileRoute("/game/$sessionId")({
 	component: GamePage,
 });
 
+const BET_PRESETS = [10, 50, 100, 500];
+const POLL_INTERVAL_MS = 2000;
+const HEARTBEAT_INTERVAL_MS = 10_000;
+
+function cardAnimStyle(
+	deal: boolean,
+	reveal: boolean,
+	index: number,
+): React.CSSProperties | undefined {
+	if (deal) return { animation: `deal-in 0.4s ease-out ${index * 0.15}s both` };
+	if (reveal)
+		return { animation: `reveal-pop 0.5s ease-out ${index * 0.2}s both` };
+	return undefined;
+}
+
 function GamePage() {
 	const { sessionId } = Route.useLoaderData();
 	const navigate = useNavigate();
 	const { t } = useI18n();
 	const { play, muted, toggleMute } = useSounds();
+	const { user, updatePromptPayId } = useAuth();
+
 	const [view, setView] = useState<ClientGameView | null>(null);
 	const [betAmount, setBetAmount] = useState(50);
 	const [error, setError] = useState("");
@@ -52,12 +76,31 @@ function GamePage() {
 		string,
 		{ name: string; balance: number }
 	> | null>(null);
-	const [qrPayload, setQrPayload] = useState("");
-	const [promptPayId, setPromptPayId] = useState("");
-	const [showQr, setShowQr] = useState(false);
+
+	// Per-player QR state: map of playerId -> generated payload
+	const [qrPayloads, setQrPayloads] = useState<Record<string, string>>({});
+	const [activeQrPlayer, setActiveQrPlayer] = useState<string | null>(null);
+
+	// PromptPay ID editing
+	const [promptPayInput, setPromptPayInput] = useState(user?.promptPayId ?? "");
+	const [showPromptPayEditor, setShowPromptPayEditor] = useState(false);
+	const [savingPromptPay, setSavingPromptPay] = useState(false);
+
 	const [paymentStatus, setPaymentStatus] = useState<
 		Record<string, "pending" | "confirmed" | "disputed">
 	>({});
+
+	const [dealAnimation, setDealAnimation] = useState(false);
+	const [revealAnimation, setRevealAnimation] = useState(false);
+	const [drawAnimation, setDrawAnimation] = useState(false);
+	const prevPhaseRef = useRef("");
+	const prevCardCountRef = useRef(0);
+	const loadingRef = useRef(false);
+	const reconnecting = useRef(false);
+
+	useEffect(() => {
+		loadingRef.current = loading;
+	}, [loading]);
 
 	const getPlayerId = useCallback((): string => {
 		return sessionStorage.getItem(`player_${sessionId}`) ?? "";
@@ -70,18 +113,99 @@ function GamePage() {
 			const data = await getGameViewFn({ data: { sessionId, playerId } });
 			setView(data);
 			setError("");
+			reconnecting.current = false;
 		} catch (e) {
-			setError(e instanceof Error ? e.message : t("error.failedLoad"));
+			if (!reconnecting.current) {
+				reconnecting.current = true;
+				setError(e instanceof Error ? e.message : t("error.failedLoad"));
+			}
 		}
 	}, [sessionId, getPlayerId, t]);
 
-	const [initialized, setInitialized] = useState(false);
-	if (!initialized && typeof window !== "undefined") {
-		setInitialized(true);
-		setTimeout(() => refreshView(), 0);
-	}
+	// ── Polling ──────────────────────────────────────────────────────────────
+	useEffect(() => {
+		const playerId = getPlayerId();
+		if (!playerId) return;
+
+		refreshView();
+
+		const pollInterval = setInterval(() => {
+			if (loadingRef.current) return;
+			const pid = getPlayerId();
+			if (!pid) return;
+			getGameViewFn({ data: { sessionId, playerId: pid } })
+				.then((data) => {
+					setView((prev) => {
+						if (prev && prev.version === data.version) return prev;
+						return data;
+					});
+					setError("");
+					reconnecting.current = false;
+				})
+				.catch(() => {
+					// Will retry on next tick; no-op to avoid error flash
+				});
+		}, POLL_INTERVAL_MS);
+
+		return () => clearInterval(pollInterval);
+	}, [sessionId, getPlayerId, refreshView]);
+
+	// ── Heartbeat ─────────────────────────────────────────────────────────────
+	useEffect(() => {
+		const playerId = getPlayerId();
+		if (!playerId) return;
+
+		const hbInterval = setInterval(() => {
+			heartbeatFn({ data: { sessionId, playerId } }).catch(() => {});
+		}, HEARTBEAT_INTERVAL_MS);
+
+		// Send one immediately
+		heartbeatFn({ data: { sessionId, playerId } }).catch(() => {});
+
+		return () => clearInterval(hbInterval);
+	}, [sessionId, getPlayerId]);
+
+	// ── Phase / card animations ───────────────────────────────────────────────
+	const currentPhase = view?.phase ?? "";
+	const myCardCount = view?.myCards.length ?? 0;
+
+	useEffect(() => {
+		if (!currentPhase) return;
+		const prev = prevPhaseRef.current;
+		prevPhaseRef.current = currentPhase;
+
+		if (prev && prev !== currentPhase) {
+			if (prev === "betting" && currentPhase === "playing") {
+				setDealAnimation(true);
+				play("deal");
+				setTimeout(() => setDealAnimation(false), 1500);
+			}
+			if (prev === "playing" && currentPhase === "reveal") {
+				setRevealAnimation(true);
+				play("win");
+				setTimeout(() => setRevealAnimation(false), 2000);
+			}
+		}
+	}, [currentPhase, play]);
+
+	useEffect(() => {
+		if (myCardCount === 3 && prevCardCountRef.current === 2) {
+			setDrawAnimation(true);
+			play("card-flip");
+			setTimeout(() => setDrawAnimation(false), 500);
+		}
+		prevCardCountRef.current = myCardCount;
+	}, [myCardCount, play]);
 
 	const myPlayerId = typeof window !== "undefined" ? getPlayerId() : "";
+	const isHost = view?.players.find((p) => p.isDealer)?.id === myPlayerId;
+	const amDealer =
+		view?.players.find((p) => p.id === myPlayerId)?.isDealer ?? false;
+	const me = view?.players.find((p) => p.id === myPlayerId);
+	const allPlayersActed =
+		view?.players
+			.filter((p) => !p.isDealer)
+			.every((p) => p.hasDrawn || p.hasStood) ?? false;
 
 	async function handleAction(
 		action: () => Promise<unknown>,
@@ -101,15 +225,6 @@ function GamePage() {
 		}
 	}
 
-	const isHost = view?.players.find((p) => p.isDealer)?.id === myPlayerId;
-	const amDealer =
-		view?.players.find((p) => p.id === myPlayerId)?.isDealer ?? false;
-	const me = view?.players.find((p) => p.id === myPlayerId);
-	const allPlayersActed =
-		view?.players
-			.filter((p) => !p.isDealer)
-			.every((p) => p.hasDrawn || p.hasStood) ?? false;
-
 	function formatHandType(
 		result: { handType: string; deng: number } | undefined,
 	): string {
@@ -127,16 +242,119 @@ function GamePage() {
 		return t(key);
 	}
 
+	// ── PromptPay helpers ─────────────────────────────────────────────────────
+
+	async function handleSavePromptPay() {
+		const pid = getPlayerId();
+		if (!pid) return;
+		setSavingPromptPay(true);
+		try {
+			await setPromptPayIdFn({
+				data: { sessionId, playerId: pid, promptPayId: promptPayInput.trim() },
+			});
+			updatePromptPayId(promptPayInput.trim());
+			setShowPromptPayEditor(false);
+			await refreshView();
+		} catch {
+			// non-critical — user can retry
+		} finally {
+			setSavingPromptPay(false);
+		}
+	}
+
+	/** Generate or show QR for a specific payer → recipient relationship */
+	async function showQrFor(
+		payerId: string,
+		recipientId: string,
+		amount: number,
+	) {
+		const recipientPromptPay = view?.playerPromptPayIds[recipientId];
+		if (!recipientPromptPay) return;
+
+		const key = `${payerId}->${recipientId}`;
+		if (qrPayloads[key]) {
+			setActiveQrPlayer(activeQrPlayer === key ? null : key);
+			return;
+		}
+		try {
+			const result = await generateQrPayloadFn({
+				data: { targetId: recipientPromptPay, amount },
+			});
+			setQrPayloads((prev) => ({ ...prev, [key]: result.payload }));
+			setActiveQrPlayer(key);
+			play("click");
+		} catch (e) {
+			setError(e instanceof Error ? e.message : t("error.failedQr"));
+		}
+	}
+
 	if (!view) {
 		return (
 			<div className="flex items-center justify-center min-h-[60vh]">
-				<div className="text-[#71717A]">{t("game.loading")}</div>
+				<div className="text-[#71717A]">
+					{error ? (
+						<div className="text-center space-y-3">
+							<WifiOff className="w-10 h-10 text-red-400 mx-auto" />
+							<p className="text-red-400">{error}</p>
+							<button
+								type="button"
+								onClick={refreshView}
+								className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm"
+							>
+								{t("game.refresh")}
+							</button>
+						</div>
+					) : (
+						t("game.loading")
+					)}
+				</div>
 			</div>
 		);
 	}
 
+	// ── Calculate settlements per-pair (who owes whom) ────────────────────────
+	const dealer = view.players.find((p) => p.isDealer);
+	/**
+	 * For settlement: each non-dealer with negative balance owes the dealer.
+	 * For future: if dealer owes players, dealer pays them.
+	 *
+	 * Debt pairs: { payerId, recipientId, amount }
+	 */
+	const debtPairs: Array<{
+		payerId: string;
+		payerName: string;
+		recipientId: string;
+		recipientName: string;
+		amount: number;
+	}> = [];
+	if (settlement && dealer) {
+		for (const [pid, info] of Object.entries(settlement)) {
+			if (pid === dealer.id) continue;
+			if (info.balance < 0) {
+				// Non-dealer owes dealer
+				debtPairs.push({
+					payerId: pid,
+					payerName: info.name,
+					recipientId: dealer.id,
+					recipientName: settlement[dealer.id]?.name ?? dealer.name,
+					amount: Math.abs(info.balance),
+				});
+			} else if (info.balance > 0) {
+				// Dealer owes non-dealer
+				debtPairs.push({
+					payerId: dealer.id,
+					payerName: settlement[dealer.id]?.name ?? dealer.name,
+					recipientId: pid,
+					recipientName: info.name,
+					amount: info.balance,
+				});
+			}
+		}
+	}
+
 	return (
 		<div className="max-w-6xl mx-auto space-y-6">
+			{/* ── Header ─────────────────────────────────────────────────────── */}
 			<div className="flex items-center justify-between">
 				<div>
 					<h1 className="text-2xl font-bold text-white">
@@ -151,6 +369,19 @@ function GamePage() {
 					</p>
 				</div>
 				<div className="flex gap-2">
+					{/* PromptPay ID button */}
+					<button
+						type="button"
+						onClick={() => setShowPromptPayEditor(!showPromptPayEditor)}
+						className={`p-2 border rounded-lg transition-colors ${
+							me && view.playerPromptPayIds[myPlayerId]
+								? "bg-green-500/20 border-green-500/40 text-green-400 hover:bg-green-500/30"
+								: "bg-[#27272A] border-[#3F3F46] hover:bg-[#3F3F46] text-[#A1A1AA]"
+						}`}
+						title="Set your PromptPay ID"
+					>
+						<Wallet className="w-4 h-4" />
+					</button>
 					<button
 						type="button"
 						onClick={toggleMute}
@@ -182,12 +413,49 @@ function GamePage() {
 				</div>
 			</div>
 
+			{/* ── PromptPay editor (inline) ───────────────────────────────────── */}
+			{showPromptPayEditor && (
+				<div className="bg-[#27272A] border border-yellow-500/30 rounded-xl p-4 space-y-3">
+					<p className="text-sm font-semibold text-yellow-400 flex items-center gap-2">
+						<Wallet className="w-4 h-4" />
+						Set your PromptPay ID so others can pay you
+					</p>
+					<div className="flex gap-3">
+						<input
+							type="text"
+							value={promptPayInput}
+							onChange={(e) => setPromptPayInput(e.target.value)}
+							placeholder="Phone number or Citizen ID"
+							className="flex-1 px-3 py-2 bg-[#18181B] border border-[#3F3F46] rounded-lg text-white placeholder-[#71717A] focus:outline-none focus:border-yellow-500 text-sm"
+						/>
+						<button
+							type="button"
+							onClick={handleSavePromptPay}
+							disabled={savingPromptPay}
+							className="px-4 py-2 bg-yellow-600 hover:bg-yellow-700 disabled:opacity-50 text-white rounded-lg text-sm font-medium transition-colors"
+						>
+							Save
+						</button>
+						<button
+							type="button"
+							onClick={() => setShowPromptPayEditor(false)}
+							className="px-3 py-2 bg-[#3F3F46] hover:bg-[#52525B] text-white rounded-lg text-sm transition-colors"
+						>
+							✕
+						</button>
+					</div>
+				</div>
+			)}
+
+			{/* ── Error banner ────────────────────────────────────────────────── */}
 			{error && (
-				<div className="bg-red-500/10 border border-red-500/30 rounded-lg p-3 text-red-400 text-sm">
+				<div className="bg-red-500/10 border border-red-500/30 rounded-lg p-3 text-red-400 text-sm flex items-center gap-2">
+					<WifiOff className="w-4 h-4 shrink-0" />
 					{error}
 				</div>
 			)}
 
+			{/* ── Players & Balances ──────────────────────────────────────────── */}
 			<div className="bg-[#27272A] border border-[#3F3F46] rounded-xl p-4">
 				<h3 className="text-sm font-semibold text-[#A1A1AA] mb-3 flex items-center gap-2">
 					<Users className="w-4 h-4" />
@@ -205,6 +473,15 @@ function GamePage() {
 						>
 							<div className="flex items-center gap-2 mb-1">
 								{p.isDealer && <Crown className="w-3 h-3 text-yellow-400" />}
+								{/* Connection indicator */}
+								{p.connected === false ? (
+									<WifiOff
+										className="w-3 h-3 text-red-400"
+										title="Disconnected"
+									/>
+								) : (
+									<Wifi className="w-3 h-3 text-green-400 opacity-50" />
+								)}
 								<span className="text-white text-sm font-medium truncate">
 									{p.name}
 									{p.id === myPlayerId && ` ${t("game.you")}`}
@@ -225,11 +502,21 @@ function GamePage() {
 									{t("game.bet")}: {p.bet}
 								</div>
 							)}
+							{/* PromptPay indicator */}
+							{view.playerPromptPayIds[p.id] && (
+								<div className="flex items-center gap-1 mt-1">
+									<Wallet className="w-3 h-3 text-green-400" />
+									<span className="text-xs text-green-400 truncate">
+										{view.playerPromptPayIds[p.id]}
+									</span>
+								</div>
+							)}
 						</div>
 					))}
 				</div>
 			</div>
 
+			{/* ── Dealer hand ─────────────────────────────────────────────────── */}
 			{view.phase !== "lobby" && view.phase !== "betting" && (
 				<div className="bg-[#27272A] border border-[#3F3F46] rounded-xl p-4">
 					<h3 className="text-sm font-semibold text-[#A1A1AA] mb-3 flex items-center gap-2">
@@ -238,14 +525,15 @@ function GamePage() {
 					</h3>
 					<div className="flex gap-2">
 						{(() => {
-							const dealer = view.players.find((p) => p.isDealer);
 							if (!dealer) return null;
 							if (dealer.cards && dealer.cards.length > 0) {
 								return dealer.cards.map((card, i) => (
-									<PlayingCard
-										key={`${card.suit}-${card.rank}-d${String(i)}`}
-										card={card}
-									/>
+									<div
+										key={`d-${card.suit}-${card.rank}-${String(i)}`}
+										style={cardAnimStyle(dealAnimation, revealAnimation, i)}
+									>
+										<PlayingCard card={card} />
+									</div>
 								));
 							}
 							return Array.from({ length: dealer.cardCount }, (_, i) => (
@@ -253,38 +541,44 @@ function GamePage() {
 							));
 						})()}
 					</div>
-					{view.phase === "reveal" &&
-						(() => {
-							const dealer = view.players.find((p) => p.isDealer);
-							if (!dealer?.result) return null;
-							return (
-								<div className="mt-2 text-sm">
-									<span className="text-yellow-400 font-medium">
-										{t("game.taem")}: {dealer.result.score}
-									</span>
-									{formatHandType(dealer.result) && (
-										<span className="ml-2 text-purple-400">
-											{formatHandType(dealer.result)}
-										</span>
-									)}
-								</div>
-							);
-						})()}
+					{view.phase === "reveal" && dealer?.result && (
+						<div className="mt-2 text-sm">
+							<span className="text-yellow-400 font-medium">
+								{t("game.taem")}: {dealer.result.score}
+							</span>
+							{formatHandType(dealer.result) && (
+								<span className="ml-2 text-purple-400">
+									{formatHandType(dealer.result)}
+								</span>
+							)}
+						</div>
+					)}
 				</div>
 			)}
 
+			{/* ── My hand ─────────────────────────────────────────────────────── */}
 			{!amDealer && view.phase !== "lobby" && view.phase !== "betting" && (
 				<div className="bg-[#27272A] border border-blue-500/50 rounded-xl p-4">
 					<h3 className="text-sm font-semibold text-blue-400 mb-3">
 						{t("game.yourHand")}
 					</h3>
 					<div className="flex gap-2">
-						{view.myCards.map((card, i) => (
-							<PlayingCard
-								key={`my-${card.suit}-${card.rank}-${String(i)}`}
-								card={card}
-							/>
-						))}
+						{view.myCards.map((card, i) => {
+							const isThirdCard = i === 2 && view.myCards.length === 3;
+							const animStyle =
+								cardAnimStyle(dealAnimation, false, i) ??
+								(isThirdCard && drawAnimation
+									? { animation: "draw-in 0.4s ease-out both" }
+									: undefined);
+							return (
+								<div
+									key={`my-${card.suit}-${card.rank}-${String(i)}`}
+									style={animStyle}
+								>
+									<PlayingCard card={card} />
+								</div>
+							);
+						})}
 					</div>
 					{view.myResult && (
 						<div className="mt-2 text-sm">
@@ -311,11 +605,12 @@ function GamePage() {
 				</div>
 			)}
 
+			{/* ── Other players' hands (reveal) ───────────────────────────────── */}
 			{view.phase === "reveal" && (
 				<div className="grid grid-cols-1 md:grid-cols-2 gap-4">
 					{view.players
 						.filter((p) => !p.isDealer && p.id !== myPlayerId)
-						.map((p) => (
+						.map((p, pi) => (
 							<div
 								key={p.id}
 								className="bg-[#27272A] border border-[#3F3F46] rounded-xl p-4"
@@ -324,12 +619,13 @@ function GamePage() {
 									{p.name}
 								</h3>
 								<div className="flex gap-2">
-									{p.cards?.map((card, i) => (
-										<PlayingCard
-											key={`${p.id}-${card.suit}-${card.rank}-${String(i)}`}
-											card={card}
-											small
-										/>
+									{p.cards?.map((card, ci) => (
+										<div
+											key={`${p.id}-${card.suit}-${card.rank}-${String(ci)}`}
+											style={cardAnimStyle(false, revealAnimation, pi * 3 + ci)}
+										>
+											<PlayingCard card={card} small />
+										</div>
 									)) ??
 										Array.from({ length: p.cardCount }, (_, i) => (
 											<CardBack key={`${p.id}-back-${String(i)}`} small />
@@ -362,6 +658,7 @@ function GamePage() {
 				</div>
 			)}
 
+			{/* ── Actions ─────────────────────────────────────────────────────── */}
 			<div className="bg-[#27272A] border border-[#3F3F46] rounded-xl p-4">
 				<h3 className="text-sm font-semibold text-[#A1A1AA] mb-3">
 					{t("game.actions")}
@@ -393,6 +690,25 @@ function GamePage() {
 
 					{view.phase === "betting" && !amDealer && (
 						<>
+							<div className="flex gap-1.5">
+								{BET_PRESETS.map((preset) => (
+									<button
+										key={preset}
+										type="button"
+										onClick={() => {
+											setBetAmount(preset);
+											play("click");
+										}}
+										className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+											betAmount === preset
+												? "bg-yellow-600 text-white"
+												: "bg-[#3F3F46] text-[#A1A1AA] hover:bg-[#52525B]"
+										}`}
+									>
+										{preset}
+									</button>
+								))}
+							</div>
 							<div className="flex items-center gap-2">
 								<label htmlFor="betInput" className="text-[#A1A1AA] text-sm">
 									{t("game.bet")}:
@@ -602,12 +918,14 @@ function GamePage() {
 				</div>
 			</div>
 
+			{/* ── Settlement ──────────────────────────────────────────────────── */}
 			{settlement && (
 				<div className="bg-[#27272A] border border-[#3F3F46] rounded-xl p-6 space-y-6">
 					<h2 className="text-xl font-bold text-white">
 						{t("settlement.title")}
 					</h2>
 
+					{/* Final balances */}
 					<div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
 						{Object.entries(settlement).map(([pid, info]) => (
 							<div
@@ -644,6 +962,13 @@ function GamePage() {
 									{info.balance >= 0 ? "+" : ""}
 									{info.balance} THB
 								</p>
+								{/* Show PromptPay ID if they have one */}
+								{view.playerPromptPayIds[pid] && (
+									<p className="text-xs text-green-400 mt-1 flex items-center gap-1">
+										<Wallet className="w-3 h-3" />
+										{view.playerPromptPayIds[pid]}
+									</p>
+								)}
 								{info.balance < 0 && paymentStatus[pid] !== "confirmed" && (
 									<p className="text-xs text-[#71717A] mt-1">
 										{t("settlement.owesDealer", Math.abs(info.balance))}
@@ -653,75 +978,141 @@ function GamePage() {
 						))}
 					</div>
 
-					<div className="border-t border-[#3F3F46] pt-6">
-						<h3 className="text-lg font-semibold text-white mb-2">
+					{/* ── Per-pair payment resolution ─────────────────────────── */}
+					<div className="border-t border-[#3F3F46] pt-6 space-y-4">
+						<h3 className="text-lg font-semibold text-white">
 							{t("settlement.paymentResolution")}
 						</h3>
-						<p className="text-[#A1A1AA] text-sm mb-4">
+						<p className="text-[#A1A1AA] text-sm">
 							{t("settlement.paymentHint")}
 						</p>
 
-						<div className="space-y-3">
-							{Object.entries(settlement)
-								.filter(([_, info]) => info.balance < 0)
-								.map(([pid, info]) => (
-									<div
-										key={pid}
-										className="flex items-center justify-between p-3 bg-[#18181B] border border-[#3F3F46] rounded-lg"
-									>
-										<div>
-											<p className="text-white text-sm font-medium">
-												{info.name}
-											</p>
-											<p className="text-red-400 text-sm">
-												{t("settlement.owesDealer", Math.abs(info.balance))}
-											</p>
-										</div>
-										{paymentStatus[pid] === "confirmed" ? (
-											<span className="flex items-center gap-1 text-green-400 text-sm">
-												<CheckCircle className="w-4 h-4" />
-												{t("settlement.confirmed")}
-											</span>
-										) : paymentStatus[pid] === "disputed" ? (
-											<span className="flex items-center gap-1 text-red-400 text-sm">
-												<XCircle className="w-4 h-4" />
-												{t("settlement.disputed")}
-											</span>
-										) : (
-											<div className="flex gap-2">
-												<button
-													type="button"
-													onClick={() => {
-														setPaymentStatus((prev) => ({
-															...prev,
-															[pid]: "confirmed",
-														}));
-														play("win");
-													}}
-													className="flex items-center gap-1 px-3 py-1.5 bg-green-600 hover:bg-green-700 text-white rounded-lg text-sm font-medium transition-colors"
-												>
-													<CheckCircle className="w-3.5 h-3.5" />
-													{t("settlement.received")}
-												</button>
-												<button
-													type="button"
-													onClick={() => {
-														setPaymentStatus((prev) => ({
-															...prev,
-															[pid]: "disputed",
-														}));
-														play("lose");
-													}}
-													className="flex items-center gap-1 px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white rounded-lg text-sm font-medium transition-colors"
-												>
-													<XCircle className="w-3.5 h-3.5" />
-													{t("settlement.notReceived")}
-												</button>
+						{debtPairs.length === 0 ? (
+							<p className="text-[#71717A] text-sm">No outstanding debts.</p>
+						) : (
+							<div className="space-y-4">
+								{debtPairs.map(
+									({
+										payerId,
+										payerName,
+										recipientId,
+										recipientName,
+										amount,
+									}) => {
+										const pairKey = `${payerId}->${recipientId}`;
+										const recipientPromptPay =
+											view.playerPromptPayIds[recipientId];
+										const qrPayload = qrPayloads[pairKey];
+										const isQrActive = activeQrPlayer === pairKey;
+										const status = paymentStatus[pairKey];
+
+										return (
+											<div
+												key={pairKey}
+												className="bg-[#18181B] border border-[#3F3F46] rounded-xl p-4 space-y-3"
+											>
+												<div className="flex items-center justify-between">
+													<div>
+														<p className="text-white text-sm font-medium">
+															<span className="text-red-400">{payerName}</span>
+															{" → "}
+															<span className="text-green-400">
+																{recipientName}
+															</span>
+														</p>
+														<p className="text-[#A1A1AA] text-sm">
+															{amount} THB
+														</p>
+														{recipientPromptPay && (
+															<p className="text-xs text-green-400 flex items-center gap-1 mt-1">
+																<Wallet className="w-3 h-3" />
+																{recipientPromptPay}
+															</p>
+														)}
+														{!recipientPromptPay && (
+															<p className="text-xs text-[#71717A] mt-1">
+																{recipientName} has not set a PromptPay ID
+															</p>
+														)}
+													</div>
+
+													{/* Status / actions */}
+													{status === "confirmed" ? (
+														<span className="flex items-center gap-1 text-green-400 text-sm">
+															<CheckCircle className="w-4 h-4" />
+															{t("settlement.confirmed")}
+														</span>
+													) : status === "disputed" ? (
+														<span className="flex items-center gap-1 text-red-400 text-sm">
+															<XCircle className="w-4 h-4" />
+															{t("settlement.disputed")}
+														</span>
+													) : (
+														<div className="flex gap-2">
+															{recipientPromptPay && (
+																<button
+																	type="button"
+																	onClick={() =>
+																		showQrFor(payerId, recipientId, amount)
+																	}
+																	className="flex items-center gap-1 px-3 py-1.5 bg-[#3F3F46] hover:bg-[#52525B] text-white rounded-lg text-sm transition-colors"
+																>
+																	<QrCode className="w-3.5 h-3.5" />
+																	QR
+																</button>
+															)}
+															<button
+																type="button"
+																onClick={() => {
+																	setPaymentStatus((prev) => ({
+																		...prev,
+																		[pairKey]: "confirmed",
+																	}));
+																	play("win");
+																}}
+																className="flex items-center gap-1 px-3 py-1.5 bg-green-600 hover:bg-green-700 text-white rounded-lg text-sm font-medium transition-colors"
+															>
+																<CheckCircle className="w-3.5 h-3.5" />
+																{t("settlement.received")}
+															</button>
+															<button
+																type="button"
+																onClick={() => {
+																	setPaymentStatus((prev) => ({
+																		...prev,
+																		[pairKey]: "disputed",
+																	}));
+																	play("lose");
+																}}
+																className="flex items-center gap-1 px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white rounded-lg text-sm font-medium transition-colors"
+															>
+																<XCircle className="w-3.5 h-3.5" />
+																{t("settlement.notReceived")}
+															</button>
+														</div>
+													)}
+												</div>
+
+												{/* QR Code */}
+												{isQrActive && qrPayload && (
+													<div className="flex justify-center">
+														<div className="bg-white p-4 rounded-xl text-center">
+															<QRCodeSVG value={qrPayload} size={200} />
+															<p className="text-black text-xs mt-2">
+																{recipientName} · {amount} THB
+															</p>
+															<p className="text-gray-500 text-xs">
+																{t("settlement.scanToPay")}
+															</p>
+														</div>
+													</div>
+												)}
 											</div>
-										)}
-									</div>
-								))}
-						</div>
+										);
+									},
+								)}
+							</div>
+						)}
 
 						{Object.values(paymentStatus).some((s) => s === "disputed") && (
 							<div className="mt-4 p-3 bg-red-500/10 border border-red-500/30 rounded-lg">
@@ -734,9 +1125,7 @@ function GamePage() {
 										setPaymentStatus((prev) => {
 											const next = { ...prev };
 											for (const key of Object.keys(next)) {
-												if (next[key] === "disputed") {
-													next[key] = "pending";
-												}
+												if (next[key] === "disputed") next[key] = "pending";
 											}
 											return next;
 										});
@@ -749,77 +1138,6 @@ function GamePage() {
 						)}
 					</div>
 
-					<div className="border-t border-[#3F3F46] pt-6">
-						<h3 className="text-lg font-semibold text-white mb-4">
-							{t("settlement.generateQr")}
-						</h3>
-						<div className="flex flex-col sm:flex-row gap-4 items-start">
-							<div className="space-y-3 flex-1">
-								<div>
-									<label
-										htmlFor="promptPayInput"
-										className="block text-sm text-[#A1A1AA] mb-1"
-									>
-										{t("settlement.recipientLabel")}
-									</label>
-									<input
-										id="promptPayInput"
-										type="text"
-										value={promptPayId}
-										onChange={(e) => setPromptPayId(e.target.value)}
-										placeholder="0812345678 / 1234567890123"
-										className="w-full px-3 py-2 bg-[#18181B] border border-[#3F3F46] rounded-lg text-white placeholder-[#71717A] focus:outline-none focus:border-blue-500"
-									/>
-								</div>
-								<div className="space-y-2">
-									{Object.entries(settlement)
-										.filter(([_, info]) => info.balance < 0)
-										.map(([pid, info]) => (
-											<button
-												type="button"
-												key={pid}
-												disabled={!promptPayId.trim()}
-												onClick={async () => {
-													try {
-														const result = await generateQrPayloadFn({
-															data: {
-																targetId: promptPayId,
-																amount: Math.abs(info.balance),
-															},
-														});
-														setQrPayload(result.payload);
-														setShowQr(true);
-														play("click");
-													} catch (e) {
-														setError(
-															e instanceof Error
-																? e.message
-																: t("error.failedQr"),
-														);
-													}
-												}}
-												className="block w-full text-left px-3 py-2 bg-[#3F3F46] hover:bg-[#52525B] disabled:opacity-50 rounded-lg text-sm text-white transition-colors"
-											>
-												{t(
-													"settlement.qrFor",
-													info.name,
-													Math.abs(info.balance),
-												)}
-											</button>
-										))}
-								</div>
-							</div>
-							{showQr && qrPayload && (
-								<div className="bg-white p-4 rounded-xl">
-									<QRCodeSVG value={qrPayload} size={200} />
-									<p className="text-black text-xs text-center mt-2">
-										{t("settlement.scanToPay")}
-									</p>
-								</div>
-							)}
-						</div>
-					</div>
-
 					<button
 						type="button"
 						onClick={() => navigate({ to: "/" })}
@@ -830,6 +1148,7 @@ function GamePage() {
 				</div>
 			)}
 
+			{/* ── Round history ───────────────────────────────────────────────── */}
 			{view.roundHistory.length > 0 && (
 				<div className="bg-[#27272A] border border-[#3F3F46] rounded-xl p-4">
 					<h3 className="text-sm font-semibold text-[#A1A1AA] mb-3">

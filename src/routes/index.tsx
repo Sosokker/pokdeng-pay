@@ -1,6 +1,7 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { Gamepad2, LogIn, Plus, Users } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { useAuth } from "#/lib/auth";
 import { useI18n } from "#/lib/i18n";
 import {
 	createSessionFn,
@@ -17,14 +18,25 @@ function LobbyPage() {
 	const sessions = Route.useLoaderData();
 	const navigate = useNavigate();
 	const { t } = useI18n();
-	const [playerName, setPlayerName] = useState("");
+	const { user } = useAuth();
+
+	// Pre-fill name from auth context
+	const [playerName, setPlayerName] = useState(user?.name ?? "");
 	const [showCreate, setShowCreate] = useState(false);
 	const [showJoin, setShowJoin] = useState<string | null>(null);
 	const [error, setError] = useState("");
 	const [loading, setLoading] = useState(false);
 
+	// Keep name in sync when auth user changes
+	useEffect(() => {
+		if (user?.name && !playerName) {
+			setPlayerName(user.name);
+		}
+	}, [user?.name, playerName]);
+
 	async function handleCreate() {
-		if (!playerName.trim()) {
+		const name = playerName.trim() || user?.name?.trim() || "";
+		if (!name) {
 			setError(t("lobby.nameRequired"));
 			return;
 		}
@@ -32,10 +44,13 @@ function LobbyPage() {
 		setError("");
 		try {
 			const result = await createSessionFn({
-				data: { hostName: playerName.trim() },
+				data: {
+					hostName: name,
+					promptPayId: user?.promptPayId,
+				},
 			});
 			sessionStorage.setItem(`player_${result.sessionId}`, result.playerId);
-			sessionStorage.setItem("playerName", playerName.trim());
+			sessionStorage.setItem("playerName", name);
 			navigate({
 				to: "/game/$sessionId",
 				params: { sessionId: result.sessionId },
@@ -48,7 +63,8 @@ function LobbyPage() {
 	}
 
 	async function handleJoin(sessionId: string) {
-		if (!playerName.trim()) {
+		const name = playerName.trim() || user?.name?.trim() || "";
+		if (!name) {
 			setError(t("lobby.nameRequired"));
 			return;
 		}
@@ -56,10 +72,14 @@ function LobbyPage() {
 		setError("");
 		try {
 			const result = await joinSessionFn({
-				data: { sessionId, playerName: playerName.trim() },
+				data: {
+					sessionId,
+					playerName: name,
+					promptPayId: user?.promptPayId,
+				},
 			});
 			sessionStorage.setItem(`player_${result.sessionId}`, result.playerId);
-			sessionStorage.setItem("playerName", playerName.trim());
+			sessionStorage.setItem("playerName", name);
 			navigate({
 				to: "/game/$sessionId",
 				params: { sessionId: result.sessionId },
@@ -113,6 +133,11 @@ function LobbyPage() {
 							maxLength={20}
 						/>
 					</div>
+					{user?.promptPayId && (
+						<p className="text-xs text-green-400">
+							PromptPay: {user.promptPayId} will be shared with the table
+						</p>
+					)}
 					{error && <p className="text-red-400 text-sm">{error}</p>}
 					<div className="flex gap-3">
 						<button
