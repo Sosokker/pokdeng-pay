@@ -1,4 +1,8 @@
-import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import {
+	createFileRoute,
+	useNavigate,
+	useBlocker,
+} from "@tanstack/react-router";
 import { WifiOff } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useConfirmDialog } from "#/components/ConfirmDialog";
@@ -210,7 +214,8 @@ function GamePage() {
 		const playerId = getPlayerId();
 		if (!playerId) return;
 
-		function sendLeaveBeacon() {
+		function handleBeforeUnload() {
+			if (explicitLeaveRef.current) return;
 			const pid = localStorage.getItem(`player_${sessionId}`);
 			if (!pid) return;
 			const token = localStorage.getItem(`token_${sessionId}`);
@@ -225,21 +230,33 @@ function GamePage() {
 			} catch {}
 		}
 
-		let pageUnloading = false;
-
-		function handleBeforeUnload() {
-			pageUnloading = true;
-			sendLeaveBeacon();
-		}
-
 		window.addEventListener("beforeunload", handleBeforeUnload);
 		return () => {
 			window.removeEventListener("beforeunload", handleBeforeUnload);
-			if (!pageUnloading && !explicitLeaveRef.current) {
-				sendLeaveBeacon();
-			}
 		};
 	}, [sessionId, getPlayerId]);
+
+	const blocker = useBlocker({
+		shouldBlockFn: ({ current, next }) => {
+			if (explicitLeaveRef.current) return false;
+			return current.routeId === "/game/$sessionId" && next.routeId !== "/game/$sessionId";
+		},
+		withResolver: true,
+	});
+
+	useEffect(() => {
+		if (blocker.status === "blocked") {
+			const pid = getPlayerId();
+			if (pid) {
+				leaveSessionFn({
+					data: { sessionId, playerId: pid, token: getToken() },
+				}).catch(() => {});
+				localStorage.removeItem(`player_${sessionId}`);
+				localStorage.removeItem(`token_${sessionId}`);
+			}
+			blocker.proceed();
+		}
+	}, [blocker.status, blocker.proceed, sessionId, getPlayerId, getToken]);
 
 	const currentPhase = view?.phase ?? "";
 	const myCardCount = view?.myCards.length ?? 0;
