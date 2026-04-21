@@ -3,10 +3,33 @@ import { json } from "@tanstack/react-start";
 import { cleanupExpiredSessions, markDisconnectedPlayers } from "#/lib/db";
 import { forceForfeitDisconnectedPlayers } from "#/lib/db-engine";
 
+async function getCronSecret(): Promise<string> {
+	try {
+		// @ts-expect-error
+		const cfWorkers = await import("cloudflare:workers");
+		const env = (cfWorkers as any).env;
+		if (env?.CRON_SECRET?.value) return env.CRON_SECRET.value;
+		if (typeof env?.CRON_SECRET === "string") return env.CRON_SECRET;
+	} catch {}
+	if (typeof process !== "undefined" && process.env.CRON_SECRET) {
+		return process.env.CRON_SECRET;
+	}
+	return "";
+}
+
 export const Route = createFileRoute("/api/cron/cleanup")({
 	server: {
 		handlers: {
-			POST: async () => {
+			POST: async ({ request }) => {
+				const authHeader = request.headers.get("Authorization") ?? "";
+				const token = authHeader.startsWith("Bearer ")
+					? authHeader.slice(7)
+					: "";
+				const secret = await getCronSecret();
+				if (secret && token !== secret) {
+					return json({ ok: false, error: "Unauthorized" }, { status: 401 });
+				}
+
 				await markDisconnectedPlayers();
 
 				const db = await import("#/lib/db").then((m) => m.ensureDb());

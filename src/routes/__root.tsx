@@ -6,7 +6,7 @@ import {
 	Scripts,
 } from "@tanstack/react-router";
 import { AlertTriangle, Menu, RefreshCw } from "lucide-react";
-import { createContext, useContext, useState } from "react";
+import { createContext, useContext, useEffect, useState } from "react";
 import { AuthProvider, useAuth } from "#/lib/auth";
 import { I18nProvider } from "#/lib/i18n";
 import { LoginForm } from "../components/LoginForm";
@@ -41,6 +41,22 @@ export const Route = createRootRouteWithContext<MyRouterContext>()({
 			{ charSet: "utf-8" },
 			{ name: "viewport", content: "width=device-width, initial-scale=1" },
 			{ title: "Pok Deng - Online Card Game" },
+			{
+				"http-equiv": "X-Content-Type-Options",
+				content: "nosniff",
+			},
+			{
+				"http-equiv": "X-Frame-Options",
+				content: "DENY",
+			},
+			{
+				"http-equiv": "Referrer-Policy",
+				content: "strict-origin-when-cross-origin",
+			},
+			{
+				"http-equiv": "Permissions-Policy",
+				content: "camera=(), microphone=(), geolocation=()",
+			},
 		],
 		links: [
 			{ rel: "stylesheet", href: appCss },
@@ -140,9 +156,18 @@ function AppShell() {
 function RootComponent() {
 	return (
 		<I18nProvider>
+			<LangUpdater />
 			<AuthProvider>
 				<AppShell />
 			</AuthProvider>
 		</I18nProvider>
 	);
+}
+
+function LangUpdater() {
+	const { lang } = useI18n();
+	useEffect(() => {
+		document.documentElement.lang = lang;
+	}, [lang]);
+	return null;
 }

@@ -723,6 +723,53 @@ export async function endSession(
 	return balances;
 }
 
+async function loadSessionAuxData(sessionId: string): Promise<{
+	promptPayIds: Record<string, string>;
+	connectedStatus: Record<string, boolean>;
+	emojis: Record<string, { emoji: string; timestamp: number }>;
+}> {
+	const db = await ensureDb();
+	const [ppRs, connRs, emojiRs] = await Promise.all([
+		db.execute({
+			sql: "SELECT player_id, promptpay_id FROM session_players WHERE session_id = ? AND promptpay_id IS NOT NULL",
+			args: [sessionId],
+		}),
+		db.execute({
+			sql: "SELECT player_id, connected FROM session_players WHERE session_id = ?",
+			args: [sessionId],
+		}),
+		db.execute({
+			sql: "SELECT player_id, emoji, updated_at FROM emojis WHERE session_id = ?",
+			args: [sessionId],
+		}),
+	]);
+
+	const promptPayIds: Record<string, string> = {};
+	for (const row of ppRs.rows) {
+		if (row.player_id && row.promptpay_id) {
+			promptPayIds[row.player_id as string] = row.promptpay_id as string;
+		}
+	}
+
+	const connectedStatus: Record<string, boolean> = {};
+	for (const row of connRs.rows) {
+		connectedStatus[row.player_id as string] = (row.connected as number) === 1;
+	}
+
+	const now = Date.now();
+	const emojis: Record<string, { emoji: string; timestamp: number }> = {};
+	for (const row of emojiRs.rows) {
+		const pid = row.player_id as string;
+		const emoji = row.emoji as string;
+		const timestamp = row.updated_at as number;
+		if (now - timestamp < 15_000) {
+			emojis[pid] = { emoji, timestamp };
+		}
+	}
+
+	return { promptPayIds, connectedStatus, emojis };
+}
+
 export async function getClientView(
 	sessionId: string,
 	playerId: string,
@@ -748,9 +795,8 @@ export async function getClientView(
 	const round = s.currentRound;
 	const isReveal = round?.phase === "reveal";
 
-	const promptPayIds = await loadPromptPayIds(sessionId);
-	const connectedStatus = await loadConnectedStatus(sessionId);
-	const emojis = await loadEmojis(sessionId);
+	const { promptPayIds, connectedStatus, emojis } =
+		await loadSessionAuxData(sessionId);
 
 	const players = s.players.map((p) => {
 		const roundPlayer = round?.players.find((rp) => rp.playerId === p.id);

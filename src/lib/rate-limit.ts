@@ -7,9 +7,12 @@ interface RateLimitEntry {
 }
 
 const store = new Map<string, RateLimitEntry>();
+let lastCleanup = 0;
 
 function cleanup(): void {
 	const now = Date.now();
+	if (now - lastCleanup < WINDOW_MS) return;
+	lastCleanup = now;
 	for (const [key, entry] of store) {
 		if (now - entry.windowStart > WINDOW_MS * 2) {
 			store.delete(key);
@@ -46,4 +49,9 @@ export function rateLimitKey(
 	action: string,
 ): string {
 	return `${sessionId}:${playerId}:${action}`;
+}
+
+export function resetRateLimitStore(): void {
+	store.clear();
+	lastCleanup = 0;
 }

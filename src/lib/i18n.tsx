@@ -36,6 +36,8 @@ const en: TranslationDict = {
 	"auth.loggedInAs": (name: string) => `Logged in as ${name}`,
 	"auth.logout": "Logout",
 	"auth.changeSettings": "Settings",
+	"auth.invalidPromptPayId":
+		"Invalid PromptPay ID. Must be 10 digits (phone) or 13 digits (Citizen ID)",
 
 	"lobby.title": "Game Lobby",
 	"lobby.subtitle": "Create or join a Pok Deng session",
@@ -195,6 +197,8 @@ const th: TranslationDict = {
 	"auth.loggedInAs": (name: string) => `ล็อกอินเป็น ${name}`,
 	"auth.logout": "ออกจากระบบ",
 	"auth.changeSettings": "ตั้งค่า",
+	"auth.invalidPromptPayId":
+		"หมายเลข PromptPay ไม่ถูกต้อง ต้องเป็นตัวเลข 10 หลัก (เบอร์โทร) หรือ 13 หลัก (บัตรประชาชน)",
 
 	"lobby.title": "ห้องเกม",
 	"lobby.subtitle": "สร้างหรือเข้าร่วมเซสชันป๊อกเด้ง",

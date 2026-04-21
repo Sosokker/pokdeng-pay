@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useI18nSafe } from "#/lib/i18n";
 import type { Card, Suit } from "#/lib/types";
 
 const SUIT_SYMBOLS: Record<Suit, string> = {

@@ -26,9 +26,7 @@ export function LoginForm() {
 			return;
 		}
 		if (promptPayId.trim() && !isValidPromptPayId(promptPayId)) {
-			setError(
-				"Invalid PromptPay ID. Must be 10 digits (phone) or 13 digits (Citizen ID)",
-			);
+			setError(t("auth.invalidPromptPayId"));
 			return;
 		}
 		setError("");

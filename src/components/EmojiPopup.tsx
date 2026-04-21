@@ -13,7 +13,7 @@ export function EmojiPopup({ emoji }: { emoji: string; timestamp: number }) {
 
 	return (
 		<div
-			className="absolute -top-14 left-1/2 -translate-x-1/2 text-5xl z-50 pointer-events-none"
+			className="absolute -top-14 left-1/2 -translate-x-1/2 text-4xl z-40 pointer-events-none"
 			style={{
 				animation: "emojiFloat 2s ease-out forwards",
 			}}

@@ -225,7 +225,7 @@ export function Sidebar() {
 								</p>
 								<p className="text-xs text-[#71717A]">
 									{user.authType === "guest"
-										? "Guest account"
+										? t("auth.guestMode")
 										: `${user.oauthProvider} account`}
 								</p>
 							</div>
@@ -258,7 +258,7 @@ export function Sidebar() {
 								onClick={handleSavePromptPay}
 								className="flex-1 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-medium transition-colors"
 							>
-								Save
+								{t("game.save")}
 							</button>
 							<button
 								type="button"

@@ -299,13 +299,22 @@ export const kickPlayerFn = createServerFn()
 		return { ok: true };
 	});
 
+const EMOJI_REGEX = /^(?:\p{Extended_Pictographic}|\p{Emoji_Component})+$/u;
+
+function isValidEmoji(str: string): boolean {
+	if (!str || str.length > 20) return false;
+	return EMOJI_REGEX.test(str);
+}
+
 export const sendEmojiFn = createServerFn()
 	.inputValidator(
 		z.object({
 			sessionId: z.string(),
 			playerId: z.string(),
 			token: z.string().optional(),
-			emoji: z.string(),
+			emoji: z.string().refine(isValidEmoji, {
+				message: "Invalid emoji",
+			}),
 		}),
 	)
 	.handler(async ({ data }) => {

@@ -1,4 +1,5 @@
 import { type Client, createClient } from "@libsql/client";
+import { log } from "./logger";
 
 let dbClient: Client | null = null;
 
@@ -112,15 +113,14 @@ let schemaInitialised = false;
 
 export async function initializeDb(): Promise<void> {
 	if (schemaInitialised) return;
-	console.log("[db-debug] initializeDb: starting...");
+	log.info("initializeDb: starting");
 	const db = await ensureDb();
-	console.log("[db-debug] initializeDb: got client, running batch...");
 	try {
 		await db.batch(SCHEMA_STATEMENTS, "write");
 		schemaInitialised = true;
-		console.log("[db-debug] initializeDb: schema created successfully");
+		log.info("initializeDb: schema created successfully");
 	} catch (e: any) {
-		console.error("[db-debug] initializeDb FAILED:", e?.message, e?.stack);
+		log.error("initializeDb failed", { message: e?.message, stack: e?.stack });
 		throw e;
 	}
 }
@@ -173,4 +173,3 @@ export async function markDisconnectedPlayers(
 	});
 	return result.rowsAffected;
 }
-// append to SCHEMA_STATEMENTS
