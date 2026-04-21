@@ -127,12 +127,30 @@ const SCHEMA_STATEMENTS = [
 
 let schemaInitialised = false;
 
+async function runMigrations(db: Client): Promise<void> {
+	const cols = await db.execute({
+		sql: "PRAGMA table_info(session_players)",
+		args: [],
+	});
+	const hasAuthUserId = cols.rows.some(
+		(row) => (row.name as string) === "auth_user_id",
+	);
+	if (!hasAuthUserId) {
+		log.info("initializeDb: migrating - adding auth_user_id to session_players");
+		await db.execute({
+			sql: "ALTER TABLE session_players ADD COLUMN auth_user_id TEXT NOT NULL DEFAULT ''",
+			args: [],
+		});
+	}
+}
+
 export async function initializeDb(): Promise<void> {
 	if (schemaInitialised) return;
 	log.info("initializeDb: starting");
 	const db = await ensureDb();
 	try {
 		await db.batch(SCHEMA_STATEMENTS, "write");
+		await runMigrations(db);
 		schemaInitialised = true;
 		log.info("initializeDb: schema created successfully");
 	} catch (e: any) {
