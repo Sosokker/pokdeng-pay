@@ -107,6 +107,7 @@ function GamePage() {
 	const prevCardCountRef = useRef(0);
 	const loadingRef = useRef(false);
 	const reconnecting = useRef(false);
+	const explicitLeaveRef = useRef(false);
 
 	useEffect(() => {
 		loadingRef.current = loading;
@@ -209,7 +210,7 @@ function GamePage() {
 		const playerId = getPlayerId();
 		if (!playerId) return;
 
-		function handleBeforeUnload() {
+		function sendLeaveBeacon() {
 			const pid = localStorage.getItem(`player_${sessionId}`);
 			if (!pid) return;
 			const token = localStorage.getItem(`token_${sessionId}`);
@@ -224,8 +225,20 @@ function GamePage() {
 			} catch {}
 		}
 
+		let pageUnloading = false;
+
+		function handleBeforeUnload() {
+			pageUnloading = true;
+			sendLeaveBeacon();
+		}
+
 		window.addEventListener("beforeunload", handleBeforeUnload);
-		return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+		return () => {
+			window.removeEventListener("beforeunload", handleBeforeUnload);
+			if (!pageUnloading && !explicitLeaveRef.current) {
+				sendLeaveBeacon();
+			}
+		};
 	}, [sessionId, getPlayerId]);
 
 	const currentPhase = view?.phase ?? "";
@@ -357,6 +370,7 @@ function GamePage() {
 	}
 
 	async function handleLeave() {
+		explicitLeaveRef.current = true;
 		const pid = getPlayerId();
 		const inGame = view?.phase === "betting" || view?.phase === "playing";
 		if (inGame) {
@@ -367,7 +381,10 @@ function GamePage() {
 				cancelLabel: t("lobby.cancel"),
 				variant: "danger",
 			});
-			if (!ok) return;
+			if (!ok) {
+				explicitLeaveRef.current = false;
+				return;
+			}
 		}
 		if (pid) {
 			try {

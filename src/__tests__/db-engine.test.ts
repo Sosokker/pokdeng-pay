@@ -613,7 +613,7 @@ describe("startBetting", () => {
 	it("throws if fewer than 2 players", async () => {
 		const session = await createSession("Host");
 		await expect(startBetting(session.id, session.hostId)).rejects.toThrow(
-			"Need at least 2 players",
+			"Need at least 2 active players",
 		);
 	});
 

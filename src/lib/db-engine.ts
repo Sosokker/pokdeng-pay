@@ -341,7 +341,7 @@ export async function listSessions(): Promise<
 		return {
 			id: s.id,
 			hostName: host?.name ?? "Unknown",
-			playerCount: s.players.length,
+			playerCount: s.players.filter((p) => !p.leftAt).length,
 			phase: s.phase,
 		};
 	});
@@ -354,7 +354,10 @@ export async function startBetting(
 	const dbVersion = await getDbVersion(sessionId);
 	const session = await loadSession(sessionId);
 	if (!session) throw new Error("Session not found");
-	if (session.players.length < 2) throw new Error("Need at least 2 players");
+
+	const activePlayers = session.players.filter((p) => !p.leftAt);
+	if (activePlayers.length < 2)
+		throw new Error("Need at least 2 active players");
 
 	if (
 		session.currentRound &&
@@ -371,11 +374,19 @@ export async function startBetting(
 	if (!isFirstRound && !isDealer)
 		throw new Error("Only dealer can start the next round");
 
-	if (session.roundHistory.length > 0) {
-		const activePlayers = session.players.filter((p) => !p.leftAt);
-		if (activePlayers.length < 2)
-			throw new Error("Need at least 2 active players");
+	if (isFirstRound) {
+		const currentDealer = session.players.find(
+			(p) => p.id === session.dealerId,
+		);
+		if (!currentDealer || currentDealer.leftAt) {
+			session.dealerId = session.hostId;
+			for (const p of session.players) {
+				p.isDealer = p.id === session.dealerId;
+			}
+		}
+	}
 
+	if (session.roundHistory.length > 0) {
 		const prevDealerIdx = activePlayers.findIndex(
 			(p) => p.id === session.dealerId,
 		);
@@ -387,16 +398,18 @@ export async function startBetting(
 		session.dealerId = activePlayers[nextDealerIdx]!.id;
 	}
 
+	const nonDealerActive = activePlayers.filter((p) => !p.isDealer);
+	if (nonDealerActive.length === 0)
+		throw new Error("Need at least 1 non-dealer player");
+
 	const roundNumber = session.roundHistory.length + 1;
-	const players: PlayerInRound[] = session.players
-		.filter((p) => !p.isDealer && !p.leftAt)
-		.map((p) => ({
-			playerId: p.id,
-			cards: [],
-			bet: 0,
-			hasDrawn: false,
-			hasStood: false,
-		}));
+	const players: PlayerInRound[] = nonDealerActive.map((p) => ({
+		playerId: p.id,
+		cards: [],
+		bet: 0,
+		hasDrawn: false,
+		hasStood: false,
+	}));
 
 	const dealerPlayer: PlayerInRound = {
 		playerId: session.dealerId,
