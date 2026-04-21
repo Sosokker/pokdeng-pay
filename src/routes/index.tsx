@@ -56,7 +56,6 @@ function LobbyPage() {
 				data: {
 					hostName: name,
 					promptPayId: user?.promptPayId,
-					authUserId: user?.id,
 				},
 			});
 			localStorage.setItem(`player_${result.sessionId}`, result.playerId);
@@ -105,7 +104,6 @@ function LobbyPage() {
 					playerName: name,
 					promptPayId: user?.promptPayId,
 					existingPlayerId: existingPlayerId || undefined,
-					authUserId: user?.id,
 				},
 			});
 			localStorage.setItem(`player_${result.sessionId}`, result.playerId);

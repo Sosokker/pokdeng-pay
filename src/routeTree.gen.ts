@@ -15,6 +15,10 @@ import { Route as GameSessionIdRouteImport } from './routes/game.$sessionId'
 import { Route as ApiLeaveRouteImport } from './routes/api/leave'
 import { Route as ApiEventsSessionIdRouteImport } from './routes/api/events/$sessionId'
 import { Route as ApiCronCleanupRouteImport } from './routes/api/cron/cleanup'
+import { Route as ApiAuthMeRouteImport } from './routes/api/auth/me'
+import { Route as ApiAuthLogoutRouteImport } from './routes/api/auth/logout'
+import { Route as ApiAuthLoginRouteImport } from './routes/api/auth/login'
+import { Route as ApiAuthCallbackRouteImport } from './routes/api/auth/callback'
 
 const HistoryRoute = HistoryRouteImport.update({
   id: '/history',
@@ -46,12 +50,36 @@ const ApiCronCleanupRoute = ApiCronCleanupRouteImport.update({
   path: '/api/cron/cleanup',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiAuthMeRoute = ApiAuthMeRouteImport.update({
+  id: '/api/auth/me',
+  path: '/api/auth/me',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiAuthLogoutRoute = ApiAuthLogoutRouteImport.update({
+  id: '/api/auth/logout',
+  path: '/api/auth/logout',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiAuthLoginRoute = ApiAuthLoginRouteImport.update({
+  id: '/api/auth/login',
+  path: '/api/auth/login',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiAuthCallbackRoute = ApiAuthCallbackRouteImport.update({
+  id: '/api/auth/callback',
+  path: '/api/auth/callback',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/history': typeof HistoryRoute
   '/api/leave': typeof ApiLeaveRoute
   '/game/$sessionId': typeof GameSessionIdRoute
+  '/api/auth/callback': typeof ApiAuthCallbackRoute
+  '/api/auth/login': typeof ApiAuthLoginRoute
+  '/api/auth/logout': typeof ApiAuthLogoutRoute
+  '/api/auth/me': typeof ApiAuthMeRoute
   '/api/cron/cleanup': typeof ApiCronCleanupRoute
   '/api/events/$sessionId': typeof ApiEventsSessionIdRoute
 }
@@ -60,6 +88,10 @@ export interface FileRoutesByTo {
   '/history': typeof HistoryRoute
   '/api/leave': typeof ApiLeaveRoute
   '/game/$sessionId': typeof GameSessionIdRoute
+  '/api/auth/callback': typeof ApiAuthCallbackRoute
+  '/api/auth/login': typeof ApiAuthLoginRoute
+  '/api/auth/logout': typeof ApiAuthLogoutRoute
+  '/api/auth/me': typeof ApiAuthMeRoute
   '/api/cron/cleanup': typeof ApiCronCleanupRoute
   '/api/events/$sessionId': typeof ApiEventsSessionIdRoute
 }
@@ -69,6 +101,10 @@ export interface FileRoutesById {
   '/history': typeof HistoryRoute
   '/api/leave': typeof ApiLeaveRoute
   '/game/$sessionId': typeof GameSessionIdRoute
+  '/api/auth/callback': typeof ApiAuthCallbackRoute
+  '/api/auth/login': typeof ApiAuthLoginRoute
+  '/api/auth/logout': typeof ApiAuthLogoutRoute
+  '/api/auth/me': typeof ApiAuthMeRoute
   '/api/cron/cleanup': typeof ApiCronCleanupRoute
   '/api/events/$sessionId': typeof ApiEventsSessionIdRoute
 }
@@ -79,6 +115,10 @@ export interface FileRouteTypes {
     | '/history'
     | '/api/leave'
     | '/game/$sessionId'
+    | '/api/auth/callback'
+    | '/api/auth/login'
+    | '/api/auth/logout'
+    | '/api/auth/me'
     | '/api/cron/cleanup'
     | '/api/events/$sessionId'
   fileRoutesByTo: FileRoutesByTo
@@ -87,6 +127,10 @@ export interface FileRouteTypes {
     | '/history'
     | '/api/leave'
     | '/game/$sessionId'
+    | '/api/auth/callback'
+    | '/api/auth/login'
+    | '/api/auth/logout'
+    | '/api/auth/me'
     | '/api/cron/cleanup'
     | '/api/events/$sessionId'
   id:
@@ -95,6 +139,10 @@ export interface FileRouteTypes {
     | '/history'
     | '/api/leave'
     | '/game/$sessionId'
+    | '/api/auth/callback'
+    | '/api/auth/login'
+    | '/api/auth/logout'
+    | '/api/auth/me'
     | '/api/cron/cleanup'
     | '/api/events/$sessionId'
   fileRoutesById: FileRoutesById
@@ -104,6 +152,10 @@ export interface RootRouteChildren {
   HistoryRoute: typeof HistoryRoute
   ApiLeaveRoute: typeof ApiLeaveRoute
   GameSessionIdRoute: typeof GameSessionIdRoute
+  ApiAuthCallbackRoute: typeof ApiAuthCallbackRoute
+  ApiAuthLoginRoute: typeof ApiAuthLoginRoute
+  ApiAuthLogoutRoute: typeof ApiAuthLogoutRoute
+  ApiAuthMeRoute: typeof ApiAuthMeRoute
   ApiCronCleanupRoute: typeof ApiCronCleanupRoute
   ApiEventsSessionIdRoute: typeof ApiEventsSessionIdRoute
 }
@@ -152,6 +204,34 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiCronCleanupRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/auth/me': {
+      id: '/api/auth/me'
+      path: '/api/auth/me'
+      fullPath: '/api/auth/me'
+      preLoaderRoute: typeof ApiAuthMeRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/auth/logout': {
+      id: '/api/auth/logout'
+      path: '/api/auth/logout'
+      fullPath: '/api/auth/logout'
+      preLoaderRoute: typeof ApiAuthLogoutRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/auth/login': {
+      id: '/api/auth/login'
+      path: '/api/auth/login'
+      fullPath: '/api/auth/login'
+      preLoaderRoute: typeof ApiAuthLoginRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/auth/callback': {
+      id: '/api/auth/callback'
+      path: '/api/auth/callback'
+      fullPath: '/api/auth/callback'
+      preLoaderRoute: typeof ApiAuthCallbackRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -160,6 +240,10 @@ const rootRouteChildren: RootRouteChildren = {
   HistoryRoute: HistoryRoute,
   ApiLeaveRoute: ApiLeaveRoute,
   GameSessionIdRoute: GameSessionIdRoute,
+  ApiAuthCallbackRoute: ApiAuthCallbackRoute,
+  ApiAuthLoginRoute: ApiAuthLoginRoute,
+  ApiAuthLogoutRoute: ApiAuthLogoutRoute,
+  ApiAuthMeRoute: ApiAuthMeRoute,
   ApiCronCleanupRoute: ApiCronCleanupRoute,
   ApiEventsSessionIdRoute: ApiEventsSessionIdRoute,
 }

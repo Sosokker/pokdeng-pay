@@ -7,7 +7,6 @@ import {
 	useState,
 } from "react";
 
-// Auth types
 export type AuthType = "guest" | "google";
 
 export interface User {
@@ -15,7 +14,6 @@ export interface User {
 	name: string;
 	authType: AuthType;
 	oauthProvider?: string;
-	oauthId?: string;
 	promptPayId?: string;
 	createdAt: number;
 }
@@ -28,7 +26,7 @@ export interface AuthState {
 
 interface AuthContextValue extends AuthState {
 	loginAsGuest: (name: string, promptPayId?: string) => void;
-	loginWithGoogle: () => void; // Placeholder for future OAuth
+	loginWithGoogle: () => void;
 	logout: () => void;
 	updatePromptPayId: (promptPayId: string) => void;
 	updateName: (name: string) => void;
@@ -36,17 +34,7 @@ interface AuthContextValue extends AuthState {
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
-// Generate a unique guest ID
-function generateGuestId(): string {
-	const arr = new Uint8Array(16);
-	crypto.getRandomValues(arr);
-	return `guest_${Array.from(arr, (b) => b.toString(16).padStart(2, "0")).join("")}`;
-}
-
-// Storage keys
-const AUTH_STORAGE_KEY = "pokdeng-auth";
-
-function clearStalePlayerData(_userId?: string) {
+function clearStalePlayerData() {
 	const keysToRemove: string[] = [];
 	for (let i = 0; i < localStorage.length; i++) {
 		const key = localStorage.key(i);
@@ -65,6 +53,25 @@ function clearStalePlayerData(_userId?: string) {
 	}
 }
 
+async function fetchAuthUser(): Promise<User | null> {
+	try {
+		const res = await fetch("/api/auth/me", { credentials: "include" });
+		if (!res.ok) return null;
+		const data = await res.json();
+		if (!data.user) return null;
+		return {
+			id: data.user.id,
+			name: data.user.name,
+			authType: "google" as AuthType,
+			oauthProvider: data.user.oauthProvider,
+			promptPayId: data.user.promptPayId || undefined,
+			createdAt: data.user.createdAt || Date.now(),
+		};
+	} catch {
+		return null;
+	}
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
 	const [state, setState] = useState<AuthState>({
 		user: null,
@@ -72,81 +79,79 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 		isAuthenticated: false,
 	});
 
-	// Load auth state from localStorage on mount
 	useEffect(() => {
 		if (typeof window === "undefined") {
 			setState((prev) => ({ ...prev, isLoading: false }));
 			return;
 		}
 
-		try {
-			const stored = localStorage.getItem(AUTH_STORAGE_KEY);
-			if (stored) {
-				const user = JSON.parse(stored) as User;
+		fetchAuthUser().then((authUser) => {
+			if (authUser) {
 				setState({
-					user,
+					user: authUser,
+					isLoading: false,
+					isAuthenticated: true,
+				});
+				return;
+			}
+
+			const guestName = sessionStorage.getItem("playerName");
+			if (guestName) {
+				setState({
+					user: {
+						id: "",
+						name: guestName,
+						authType: "guest",
+						createdAt: Date.now(),
+					},
 					isLoading: false,
 					isAuthenticated: true,
 				});
 			} else {
 				setState((prev) => ({ ...prev, isLoading: false }));
 			}
-		} catch {
-			localStorage.removeItem(AUTH_STORAGE_KEY);
-			setState((prev) => ({ ...prev, isLoading: false }));
-		}
+		});
 	}, []);
 
 	const loginAsGuest = useCallback((name: string, promptPayId?: string) => {
 		const trimmedName = name.trim();
 		if (!trimmedName) return;
 
-		const prevStored = localStorage.getItem(AUTH_STORAGE_KEY);
-		let prevUserId: string | undefined;
-		if (prevStored) {
-			try {
-				prevUserId = (JSON.parse(prevStored) as User).id;
-			} catch {}
-		}
-
-		const user: User = {
-			id: generateGuestId(),
-			name: trimmedName,
-			authType: "guest",
-			promptPayId: promptPayId?.trim() || undefined,
-			createdAt: Date.now(),
-		};
-
-		if (prevUserId && prevUserId !== user.id) {
-			clearStalePlayerData(user.id);
-		}
-
-		localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(user));
 		sessionStorage.setItem("playerName", trimmedName);
 
 		setState({
-			user,
+			user: {
+				id: "",
+				name: trimmedName,
+				authType: "guest",
+				promptPayId: promptPayId?.trim() || undefined,
+				createdAt: Date.now(),
+			},
 			isLoading: false,
 			isAuthenticated: true,
 		});
 	}, []);
 
 	const loginWithGoogle = useCallback(() => {
-		// Placeholder for Google OAuth
-		// This will be implemented when OAuth is set up
-		console.warn("Google OAuth not yet implemented");
+		window.location.href = "/api/auth/login";
 	}, []);
 
-	const logout = useCallback(() => {
+	const logout = useCallback(async () => {
 		clearStalePlayerData();
-		localStorage.removeItem(AUTH_STORAGE_KEY);
 		sessionStorage.removeItem("playerName");
+
+		if (state.user?.authType === "google") {
+			try {
+				await fetch("/api/auth/logout", { method: "POST" });
+			} catch {}
+		}
+
 		setState({
 			user: null,
 			isLoading: false,
 			isAuthenticated: false,
 		});
-	}, []);
+	}, [state.user?.authType]);
 
 	const updatePromptPayId = useCallback((promptPayId: string) => {
 		setState((prev) => {
@@ -156,8 +161,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 				...prev.user,
 				promptPayId: promptPayId.trim() || undefined,
 			};
-
-			localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(updatedUser));
 
 			return {
 				...prev,
@@ -178,8 +181,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 				name: trimmedName,
 			};
 
-			localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(updatedUser));
-			sessionStorage.setItem("playerName", trimmedName);
+			if (prev.user.authType === "guest") {
+				sessionStorage.setItem("playerName", trimmedName);
+			}
 
 			return {
 				...prev,

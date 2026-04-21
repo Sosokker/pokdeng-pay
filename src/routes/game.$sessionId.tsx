@@ -1,8 +1,6 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { WifiOff } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ReconnectingOverlay } from "#/components/ReconnectingOverlay";
-import { RulesModal } from "#/components/RulesModal";
 import { DealerArea } from "#/components/game/DealerArea";
 import { GameHeader } from "#/components/game/GameHeader";
 import { HistoryOverlay } from "#/components/game/HistoryOverlay";
@@ -11,6 +9,8 @@ import { OpponentHand } from "#/components/game/OpponentHand";
 import { PlayerArea } from "#/components/game/PlayerArea";
 import { PromptPayEditor } from "#/components/game/PromptPayEditor";
 import { SettlementModal } from "#/components/game/SettlementModal";
+import { ReconnectingOverlay } from "#/components/ReconnectingOverlay";
+import { RulesModal } from "#/components/RulesModal";
 import { useSounds } from "#/hooks/use-sounds";
 import { useSSE } from "#/hooks/use-sse";
 import { useAuth } from "#/lib/auth";

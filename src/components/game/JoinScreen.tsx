@@ -1,5 +1,5 @@
-import { useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
+import { useState } from "react";
 import { useAuth } from "#/lib/auth";
 import { useI18n } from "#/lib/i18n";
 import { joinSessionFn } from "#/lib/server-fns";
@@ -51,7 +51,6 @@ export function JoinScreen({
 									sessionId,
 									playerName: joinName.trim(),
 									promptPayId: user?.promptPayId,
-									authUserId: user?.id,
 								},
 							});
 							localStorage.setItem(

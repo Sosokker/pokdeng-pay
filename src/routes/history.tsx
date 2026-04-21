@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { Calendar, History as HistoryIcon, Trophy } from "lucide-react";
+import { Calendar, History as HistoryIcon, LogIn, Trophy } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useAuth } from "#/lib/auth";
 import { useI18n } from "#/lib/i18n";
@@ -20,25 +20,53 @@ export const Route = createFileRoute("/history")({
 
 function HistoryPage() {
 	const { t } = useI18n();
-	const { user } = useAuth();
+	const { user, loginWithGoogle } = useAuth();
 	const [history, setHistory] = useState<HistoryEntry[]>([]);
 	const [loading, setLoading] = useState(true);
+	const isGuest = user?.authType === "guest";
 
 	useEffect(() => {
-		if (!user?.id) {
+		if (isGuest || !user?.id) {
 			setLoading(false);
 			return;
 		}
-		getPlayerHistoryFn({ data: { authUserId: user.id } })
+		getPlayerHistoryFn()
 			.then((data) => setHistory(data as HistoryEntry[]))
 			.catch(() => {})
 			.finally(() => setLoading(false));
-	}, [user?.id]);
+	}, [user?.id, isGuest]);
 
 	if (loading) {
 		return (
 			<div className="flex items-center justify-center py-20">
 				<div className="text-[#71717A] animate-pulse">{t("auth.loading")}</div>
+			</div>
+		);
+	}
+
+	if (isGuest || !user) {
+		return (
+			<div className="max-w-4xl mx-auto space-y-6">
+				<div>
+					<h1 className="text-3xl font-bold text-white flex items-center gap-3">
+						<HistoryIcon className="w-8 h-8 text-blue-400" />
+						{t("history.title")}
+					</h1>
+					<p className="text-[#A1A1AA] mt-1">{t("history.subtitle")}</p>
+				</div>
+
+				<div className="bg-[#27272A] border border-[#3F3F46] rounded-xl p-12 text-center space-y-4">
+					<HistoryIcon className="w-12 h-12 text-[#71717A] mx-auto" />
+					<p className="text-[#A1A1AA]">{t("history.signInRequired")}</p>
+					<button
+						type="button"
+						onClick={loginWithGoogle}
+						className="inline-flex items-center gap-2 px-4 py-2.5 bg-white hover:bg-gray-100 text-gray-800 rounded-lg font-medium transition-colors"
+					>
+						<LogIn className="w-4 h-4" />
+						{t("auth.continueWithGoogle")}
+					</button>
+				</div>
 			</div>
 		);
 	}

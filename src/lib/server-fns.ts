@@ -1,5 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
+import { getRequest } from "@tanstack/react-start/server";
 import { z } from "zod";
+import { getAuthUser, readSessionCookie } from "./auth-session";
 import { cleanupExpiredSessions, markDisconnectedPlayers } from "./db";
 import * as engine from "./db-engine";
 import { generatePromptPayPayload } from "./promptpay";
@@ -14,6 +16,15 @@ import {
 	sessionIdPlayerIdSchema,
 	setPromptPayIdSchema,
 } from "./validators";
+
+async function getAuthUserIdFromRequest(): Promise<string | undefined> {
+	const request = getRequest();
+	if (!request) return undefined;
+	const sessionId = readSessionCookie(request);
+	if (!sessionId) return undefined;
+	const user = await getAuthUser(sessionId);
+	return user?.id;
+}
 
 function enforceRateLimit(
 	sessionId: string,
@@ -51,7 +62,13 @@ const tokenSessionPlayerSchema = sessionIdPlayerIdSchema.merge(tokenSchema);
 const tokenBetSchema = placeBetSchema.merge(tokenSchema);
 const tokenPromptPaySchema = setPromptPayIdSchema.merge(tokenSchema);
 
-// ── Session management ────────────────────────────────────────────────────────
+export const getAuthUserFn = createServerFn().handler(async () => {
+	const request = getRequest();
+	const sessionId = request ? readSessionCookie(request) : null;
+	if (!sessionId) return { user: null };
+	const user = await getAuthUser(sessionId);
+	return { user };
+});
 
 export const listSessionsFn = createServerFn().handler(async () => {
 	return engine.listSessions();
@@ -60,10 +77,11 @@ export const listSessionsFn = createServerFn().handler(async () => {
 export const createSessionFn = createServerFn()
 	.inputValidator(createSessionSchema)
 	.handler(async ({ data }) => {
+		const authUserId = await getAuthUserIdFromRequest();
 		const session = await engine.createSession(
 			data.hostName,
 			data.config,
-			data.authUserId,
+			authUserId,
 		);
 		const hostId = session.hostId;
 		if (data.promptPayId?.trim()) {
@@ -80,6 +98,7 @@ export const createSessionFn = createServerFn()
 export const joinSessionFn = createServerFn()
 	.inputValidator(joinSessionSchema)
 	.handler(async ({ data }) => {
+		const authUserId = await getAuthUserIdFromRequest();
 		const existingPlayerId = data.existingPlayerId as string | undefined;
 		const { session, playerId } = await withRetry(() =>
 			engine.joinSession(
@@ -87,7 +106,7 @@ export const joinSessionFn = createServerFn()
 				data.playerName,
 				data.promptPayId,
 				existingPlayerId,
-				data.authUserId,
+				authUserId,
 			),
 		);
 		const token = await createPlayerToken(session.id, playerId);
@@ -102,8 +121,6 @@ export const getGameViewFn = createServerFn()
 		await verify(data.sessionId, data.playerId, data.token);
 		return engine.getClientView(data.sessionId, data.playerId);
 	});
-
-// ── Game actions ──────────────────────────────────────────────────────────────
 
 export const startBettingFn = createServerFn()
 	.inputValidator(tokenSessionPlayerSchema)
@@ -183,8 +200,6 @@ export const endSessionFn = createServerFn()
 		return balances;
 	});
 
-// ── PromptPay ─────────────────────────────────────────────────────────────────
-
 export const generateQrPayloadFn = createServerFn()
 	.inputValidator(generateQrSchema)
 	.handler(async ({ data }) => {
@@ -203,8 +218,6 @@ export const setPromptPayIdFn = createServerFn()
 		);
 		return { success: true };
 	});
-
-// ── Heartbeat / reconnect ─────────────────────────────────────────────────────
 
 export const heartbeatFn = createServerFn()
 	.inputValidator(tokenSessionPlayerSchema)
@@ -234,15 +247,11 @@ export const updatePromptPayGlobalFn = createServerFn()
 		return { ok: true };
 	});
 
-// ── Maintenance ───────────────────────────────────────────────────────────────
-
 export const cleanupSessionsFn = createServerFn().handler(async () => {
 	await markDisconnectedPlayers();
 	const removed = await cleanupExpiredSessions();
 	return { removed };
 });
-
-// ── Settlement ────────────────────────────────────────────────────────────────
 
 const settlementSchema = z.object({
 	sessionId: z.string().length(16),
@@ -324,11 +333,11 @@ export const sendEmojiFn = createServerFn()
 		return { ok: true };
 	});
 
-export const getPlayerHistoryFn = createServerFn()
-	.inputValidator(z.object({ authUserId: z.string() }))
-	.handler(async ({ data }) => {
-		return engine.getPlayerHistory(data.authUserId);
-	});
+export const getPlayerHistoryFn = createServerFn().handler(async () => {
+	const authUserId = await getAuthUserIdFromRequest();
+	if (!authUserId) return [];
+	return engine.getPlayerHistory(authUserId);
+});
 
 export const voteKickFn = createServerFn()
 	.inputValidator(

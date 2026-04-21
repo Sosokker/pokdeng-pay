@@ -5,6 +5,7 @@ import {
 	Globe,
 	History,
 	Home,
+	LogIn,
 	LogOut,
 	Menu,
 	Settings,
@@ -28,8 +29,9 @@ export function Sidebar() {
 	const [showSettings, setShowSettings] = useState(false);
 	const [promptPayInput, setPromptPayInput] = useState("");
 	const { t, toggleLang } = useI18n();
-	const { user, logout, updatePromptPayId } = useAuth();
+	const { user, logout, loginWithGoogle, updatePromptPayId } = useAuth();
 	const mobile = useSidebarMobile();
+	const isGuest = user?.authType === "guest";
 
 	async function handleSavePromptPay() {
 		updatePromptPayId(promptPayInput);
@@ -124,12 +126,32 @@ export function Sidebar() {
 								</span>
 							</div>
 						)}
+						{isGuest && (
+							<p className="text-xs text-yellow-400/70 mt-1">
+								{t("auth.guestLabel")}
+							</p>
+						)}
 					</div>
 				)}
 				{user && collapsed && (
 					<div className="flex items-center justify-center py-1">
 						<User className="w-5 h-5 text-blue-400" />
 					</div>
+				)}
+
+				{isGuest && (
+					<button
+						type="button"
+						onClick={loginWithGoogle}
+						className="flex items-center gap-3 px-3 py-2.5 rounded-lg text-[#A1A1AA] hover:bg-blue-500/20 hover:text-blue-400 transition-colors w-full"
+					>
+						<LogIn className="w-5 h-5 shrink-0" />
+						{!collapsed && (
+							<span className="text-sm font-medium">
+								{t("auth.signInForHistory")}
+							</span>
+						)}
+					</button>
 				)}
 
 				<button
@@ -163,7 +185,9 @@ export function Sidebar() {
 				>
 					<LogOut className="w-5 h-5 shrink-0" />
 					{!collapsed && (
-						<span className="text-sm font-medium">{t("auth.logout")}</span>
+						<span className="text-sm font-medium">
+							{isGuest ? t("auth.switchName") : t("auth.logout")}
+						</span>
 					)}
 				</button>
 
@@ -179,14 +203,12 @@ export function Sidebar() {
 
 	return (
 		<>
-			{/* Desktop sidebar */}
 			<aside
 				className={`hidden md:flex ${collapsed ? "w-16" : "w-56"} bg-[#27272A] border-r border-[#3F3F46] min-h-screen flex-col transition-all duration-200 shrink-0`}
 			>
 				{sidebarContent}
 			</aside>
 
-			{/* Mobile overlay sidebar */}
 			{mobile.isOpen && (
 				<>
 					<button
@@ -201,7 +223,6 @@ export function Sidebar() {
 				</>
 			)}
 
-			{/* Settings modal */}
 			{showSettings && (
 				<div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
 					<div className="bg-[#27272A] border border-[#3F3F46] rounded-xl p-6 w-full max-w-sm mx-4 space-y-4">
@@ -224,7 +245,7 @@ export function Sidebar() {
 									{t("auth.loggedInAs", user.name)}
 								</p>
 								<p className="text-xs text-[#71717A]">
-									{user.authType === "guest"
+									{isGuest
 										? t("auth.guestMode")
 										: `${user.oauthProvider} account`}
 								</p>

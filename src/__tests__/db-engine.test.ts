@@ -1,4 +1,4 @@
-import { vi, describe, it, expect, beforeEach } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mock = vi.hoisted(() => {
 	const stores = {
@@ -418,18 +418,18 @@ vi.mock("#/lib/game-engine", () => ({
 }));
 
 import {
-	sanitizeName,
 	createSession,
-	joinSession,
-	startBetting,
-	placeBet,
 	dealCards,
-	drawCard,
-	stand,
 	dealerDraw,
-	leaveSession,
-	sendEmoji,
+	drawCard,
 	getClientView,
+	joinSession,
+	leaveSession,
+	placeBet,
+	sanitizeName,
+	sendEmoji,
+	stand,
+	startBetting,
 } from "../lib/db-engine";
 
 const defaultEvalResult = {
@@ -954,7 +954,7 @@ describe("leaveSession", () => {
 		expect(roundPlayer.hasStood).toBe(true);
 	});
 
-  it("removes unbettted player from round during betting phase", async () => {
+	it("removes unbettted player from round during betting phase", async () => {
 		const { sessionId, playerId } = await setupBettingPhase();
 
 		await leaveSession(sessionId, playerId);

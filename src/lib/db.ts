@@ -107,6 +107,22 @@ const SCHEMA_STATEMENTS = [
 	)`,
 	`CREATE INDEX IF NOT EXISTS idx_history_player ON session_history(player_id)`,
 	`CREATE INDEX IF NOT EXISTS idx_history_auth ON session_history(auth_user_id)`,
+	`CREATE TABLE IF NOT EXISTS users (
+		id             TEXT PRIMARY KEY,
+		oauth_provider TEXT NOT NULL,
+		oauth_id       TEXT NOT NULL,
+		name           TEXT NOT NULL,
+		promptpay_id   TEXT,
+		created_at     INTEGER NOT NULL DEFAULT (unixepoch())
+	)`,
+	`CREATE UNIQUE INDEX IF NOT EXISTS idx_users_oauth ON users(oauth_provider, oauth_id)`,
+	`CREATE TABLE IF NOT EXISTS auth_sessions (
+		id         TEXT PRIMARY KEY,
+		user_id    TEXT NOT NULL,
+		expires_at INTEGER NOT NULL,
+		FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+	)`,
+	`CREATE INDEX IF NOT EXISTS idx_auth_sessions_user ON auth_sessions(user_id)`,
 ];
 
 let schemaInitialised = false;

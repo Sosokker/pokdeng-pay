@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { verifyPlayerToken } from "#/lib/session-token";
 import { ensureDb, initializeDb } from "#/lib/db";
+import { verifyPlayerToken } from "#/lib/session-token";
 
 const SSE_MAX_DURATION_MS = 300_000;
 const SSE_POLL_INTERVAL_MS = 2000;

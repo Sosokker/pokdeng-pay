@@ -13,7 +13,6 @@ export const createSessionSchema = z.object({
 		.max(20, "Name must be 20 characters or less"),
 	promptPayId: promptPayRefinement.optional(),
 	config: z.object({ allowAceHighStraight: z.boolean().optional() }).optional(),
-	authUserId: z.string().optional(),
 });
 
 export const joinSessionSchema = z.object({
@@ -24,7 +23,6 @@ export const joinSessionSchema = z.object({
 		.max(20, "Name must be 20 characters or less"),
 	promptPayId: promptPayRefinement.optional(),
 	existingPlayerId: z.string().length(16).optional(),
-	authUserId: z.string().optional(),
 });
 
 export const sessionIdPlayerIdSchema = z.object({

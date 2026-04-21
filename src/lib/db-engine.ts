@@ -1258,6 +1258,7 @@ export async function saveSessionHistory(
 
 	for (const player of session.players) {
 		const authId = authUserIds[player.id] ?? "";
+		if (!authId) continue;
 		await db.execute({
 			sql: `INSERT INTO session_history (id, player_id, auth_user_id, player_name, summary, balances, created_at)
 			      VALUES (?, ?, ?, ?, ?, ?, ?)`,
