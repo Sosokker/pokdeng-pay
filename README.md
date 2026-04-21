@@ -1,204 +1,98 @@
-Welcome to your new TanStack Start app! 
+# Pok Deng + PromptPay
 
-# Getting Started
+Multiplayer online Pok Deng (ป็อกเด้ง) card game with PromptPay QR code payment settlement. Players create game sessions, play rounds against a rotating dealer, and settle debts via Thai PromptPay QR codes.
 
-To run this application:
+**Live:** [pokdeng.sirin.dev](https://pokdeng.sirin.dev)
+
+## Tech Stack
+
+- **Framework:** TanStack Start (full-stack React + SSR)
+- **Database:** Turso (libSQL)
+- **Hosting:** Cloudflare Workers
+- **Styling:** Tailwind CSS v4
+- **Validation:** Zod v4
+- **Build:** Vite 8 + Bun
+- **Testing:** Vitest + Testing Library
+- **Linting:** Biome
+
+## Architecture
+
+```
+src/
+├── routes/                 # TanStack Router file-based routes
+│   ├── index.tsx           # Lobby (create/join sessions)
+│   ├── game.$sessionId.tsx # Main game page (all phases + settlement)
+│   ├── history.tsx         # Player session history
+│   └── api/                # SSE endpoint, beacon leave, cron cleanup
+├── components/             # PlayingCard (squeeze mechanic), Sidebar, LoginForm, etc.
+├── hooks/                  # use-sse (real-time), use-sounds (Web Audio synthesis)
+├── lib/
+│   ├── game-engine.ts      # Pure in-memory Pok Deng logic (hand eval, deck, scoring)
+│   ├── db-engine.ts        # Database-backed game engine (optimistic concurrency + retry)
+│   ├── db.ts               # Turso connection, schema init, cleanup
+│   ├── server-fns.ts       # TanStack server functions (API layer with validation + rate limiting)
+│   ├── promptpay.ts        # EMVCo PromptPay QR payload generator (zero-dependency)
+│   ├── promptpay-validator.ts  # Thai phone/Citizen ID validation
+│   ├── validators.ts       # Zod schemas
+│   ├── auth.tsx            # Client-side auth context (guest mode)
+│   ├── i18n.tsx            # English/Thai internationalization
+│   ├── session-token.ts    # HMAC-signed player tokens (24h TTL)
+│   ├── rate-limit.ts       # In-memory rate limiter
+│   ├── retry.ts            # Optimistic concurrency retry with backoff
+│   └── scheduled.ts        # Cloudflare Workers cron handler
+├── __tests__/              # Unit tests
+└── integrations/           # TanStack Query provider
+```
+
+### Database Schema (Turso)
+
+6 tables: `sessions`, `session_decks`, `session_players`, `settlements`, `emojis`, `session_history`. Writes use optimistic concurrency (`updated_at` as version) with automatic retry on conflict.
+
+### Real-Time
+
+Server-Sent Events (`/api/events/$sessionId`) polls DB for changes every 2s, client polls every 8s as fallback. Heartbeats every 10s; disconnected players auto-stand after 60s. Sessions with all players disconnected for 60s auto-close. Cloudflare cron runs cleanup every 5 minutes.
+
+### Game Rules
+
+Standard Pok Deng: mod-10 scoring, hand types (Pok > Tong > Sam Lueang > Normal), Deng multipliers (pair 2x, flush 3x, straight 3x, straight flush 5x, three-of-a-kind 5x). Max 17 players per session, dealer rotates each round.
+
+## Getting Started
 
 ```bash
 bun install
+cp .env.example .dev.vars  # fill in secrets
 bun --bun run dev
 ```
 
-# Building For Production
+### Required Secrets
 
-To build this application for production:
+Set in `.dev.vars` for local dev, or via `wrangler secret put` for production:
 
-```bash
-bun --bun run build
-```
+- `TURSO_DATABASE_URL` — Turso database URL
+- `TURSO_AUTH_TOKEN` — Turso auth token
+- `SESSION_SECRET` — HMAC key for player session tokens
 
-## Testing
+## Commands
 
-This project uses [Vitest](https://vitest.dev/) for testing. You can run the tests with:
+| Command | Description |
+|---|---|
+| `bun --bun run dev` | Start dev server |
+| `bun --bun run build` | Production build |
+| `bun --bun run test` | Run tests |
+| `bun --bun run lint` | Lint with Biome |
+| `bun --bun run format` | Format with Biome |
+| `bun --bun run check` | Lint + format check |
+| `bunx wrangler deploy` | Deploy to Cloudflare Workers |
 
-```bash
-bun --bun run test
-```
+## Deployment
 
-## Styling
+Configured in `wrangler.jsonc` — deploys to Cloudflare Workers with custom domain `pokdeng.sirin.dev`. Cron trigger (`*/5 * * * *`) handles session cleanup, auto-forfeit, and auto-close.
 
-This project uses [Tailwind CSS](https://tailwindcss.com/) for styling.
+## Key Design Decisions
 
-### Removing Tailwind CSS
-
-If you prefer not to use Tailwind CSS:
-
-1. Remove the demo pages in `src/routes/demo/`
-2. Replace the Tailwind import in `src/styles.css` with your own styles
-3. Remove `tailwindcss()` from the plugins array in `vite.config.ts`
-4. Uninstall the packages: `bun install @tailwindcss/vite tailwindcss -D`
-
-## Linting & Formatting
-
-This project uses [Biome](https://biomejs.dev/) for linting and formatting. The following scripts are available:
-
-
-```bash
-bun --bun run lint
-bun --bun run format
-bun --bun run check
-```
-
-
-
-## Routing
-
-This project uses [TanStack Router](https://tanstack.com/router) with file-based routing. Routes are managed as files in `src/routes`.
-
-### Adding A Route
-
-To add a new route to your application just add a new file in the `./src/routes` directory.
-
-TanStack will automatically generate the content of the route file for you.
-
-Now that you have two routes you can use a `Link` component to navigate between them.
-
-### Adding Links
-
-To use SPA (Single Page Application) navigation you will need to import the `Link` component from `@tanstack/react-router`.
-
-```tsx
-import { Link } from "@tanstack/react-router";
-```
-
-Then anywhere in your JSX you can use it like so:
-
-```tsx
-<Link to="/about">About</Link>
-```
-
-This will create a link that will navigate to the `/about` route.
-
-More information on the `Link` component can be found in the [Link documentation](https://tanstack.com/router/v1/docs/framework/react/api/router/linkComponent).
-
-### Using A Layout
-
-In the File Based Routing setup the layout is located in `src/routes/__root.tsx`. Anything you add to the root route will appear in all the routes. The route content will appear in the JSX where you render `{children}` in the `shellComponent`.
-
-Here is an example layout that includes a header:
-
-```tsx
-import { HeadContent, Scripts, createRootRoute } from '@tanstack/react-router'
-
-export const Route = createRootRoute({
-  head: () => ({
-    meta: [
-      { charSet: 'utf-8' },
-      { name: 'viewport', content: 'width=device-width, initial-scale=1' },
-      { title: 'My App' },
-    ],
-  }),
-  shellComponent: ({ children }) => (
-    <html lang="en">
-      <head>
-        <HeadContent />
-      </head>
-      <body>
-        <header>
-          <nav>
-            <Link to="/">Home</Link>
-            <Link to="/about">About</Link>
-          </nav>
-        </header>
-        {children}
-        <Scripts />
-      </body>
-    </html>
-  ),
-})
-```
-
-More information on layouts can be found in the [Layouts documentation](https://tanstack.com/router/latest/docs/framework/react/guide/routing-concepts#layouts).
-
-## Server Functions
-
-TanStack Start provides server functions that allow you to write server-side code that seamlessly integrates with your client components.
-
-```tsx
-import { createServerFn } from '@tanstack/react-start'
-
-const getServerTime = createServerFn({
-  method: 'GET',
-}).handler(async () => {
-  return new Date().toISOString()
-})
-
-// Use in a component
-function MyComponent() {
-  const [time, setTime] = useState('')
-  
-  useEffect(() => {
-    getServerTime().then(setTime)
-  }, [])
-  
-  return <div>Server time: {time}</div>
-}
-```
-
-## API Routes
-
-You can create API routes by using the `server` property in your route definitions:
-
-```tsx
-import { createFileRoute } from '@tanstack/react-router'
-import { json } from '@tanstack/react-start'
-
-export const Route = createFileRoute('/api/hello')({
-  server: {
-    handlers: {
-      GET: () => json({ message: 'Hello, World!' }),
-    },
-  },
-})
-```
-
-## Data Fetching
-
-There are multiple ways to fetch data in your application. You can use TanStack Query to fetch data from a server. But you can also use the `loader` functionality built into TanStack Router to load the data for a route before it's rendered.
-
-For example:
-
-```tsx
-import { createFileRoute } from '@tanstack/react-router'
-
-export const Route = createFileRoute('/people')({
-  loader: async () => {
-    const response = await fetch('https://swapi.dev/api/people')
-    return response.json()
-  },
-  component: PeopleComponent,
-})
-
-function PeopleComponent() {
-  const data = Route.useLoaderData()
-  return (
-    <ul>
-      {data.results.map((person) => (
-        <li key={person.name}>{person.name}</li>
-      ))}
-    </ul>
-  )
-}
-```
-
-Loaders simplify your data fetching logic dramatically. Check out more information in the [Loader documentation](https://tanstack.com/router/latest/docs/framework/react/guide/data-loading#loader-parameters).
-
-# Demo files
-
-Files prefixed with `demo` can be safely deleted. They are there to provide a starting point for you to play around with the features you've installed.
-
-# Learn More
-
-You can learn more about all of the offerings from TanStack in the [TanStack documentation](https://tanstack.com).
-
-For TanStack Start specific documentation, visit [TanStack Start](https://tanstack.com/start).
+- **Two game engines:** `game-engine.ts` (pure, for testing) and `db-engine.ts` (production, DB-backed)
+- **Zero-dependency PromptPay:** EMVCo QR spec implemented from scratch
+- **No WebSocket library:** SSE + polling works natively on Cloudflare Workers
+- **Client-side auth:** Guest mode with HMAC-signed tokens (no server auth session)
+- **Card squeeze mechanic:** Drag-to-peel card reveal simulating real card play
+- **Sound synthesis:** Web Audio API generates all sounds — no audio file dependencies
