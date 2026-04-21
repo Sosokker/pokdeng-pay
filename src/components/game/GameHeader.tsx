@@ -10,6 +10,7 @@ import {
 	Wallet,
 } from "lucide-react";
 import { EmojiPicker } from "#/components/EmojiPicker";
+import { SessionTimer } from "#/components/SessionTimer";
 import { TurnTimer } from "#/components/TurnTimer";
 import { useI18n } from "#/lib/i18n";
 import type { ClientGameView } from "#/lib/types";
@@ -62,9 +63,9 @@ export function GameHeader({
 						{phaseLabel(view.phase)}
 					</div>
 				</div>
-				{view.phase === "playing" && view.turnStartedAt && (
-					<TurnTimer startedAt={view.turnStartedAt} />
-				)}
+				{(view.phase === "playing" || view.phase === "betting") &&
+					view.turnStartedAt && <TurnTimer startedAt={view.turnStartedAt} />}
+				<SessionTimer createdAt={view.sessionCreatedAt} />
 			</div>
 
 			<div className="flex items-center gap-2">

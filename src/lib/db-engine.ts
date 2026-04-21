@@ -848,6 +848,7 @@ export async function getClientView(
 		sessionId,
 		phase: s.phase,
 		turnStartedAt: round?.startedAt,
+		sessionCreatedAt: s.createdAt,
 		version: s.version,
 		hostId: s.hostId,
 		players,
@@ -917,6 +918,25 @@ export async function leaveSession(
 			if (playerId === fresh.dealerId && fresh.currentRound.dealerHand) {
 				fresh.currentRound.dealerHand.hasStood = true;
 			}
+
+			if (fresh.currentRound.players.length > 0) {
+				const allActed = fresh.currentRound.players.every(
+					(p) => p.hasDrawn || p.hasStood,
+				);
+				const dealer = fresh.currentRound.dealerHand!;
+				if (allActed && (dealer.hasDrawn || dealer.hasStood)) {
+					await resolveRoundInline(fresh, dbVersion);
+					return;
+				}
+			}
+		}
+
+		if (
+			fresh.currentRound?.phase === "betting" &&
+			fresh.currentRound.players.length === 0
+		) {
+			fresh.currentRound = null;
+			fresh.phase = "reveal";
 		}
 
 		bump(fresh);
@@ -1135,6 +1155,54 @@ export async function removePlayer(
 		} else if (inRound && session.currentRound.phase === "playing") {
 			inRound.hasStood = true;
 		}
+
+		if (
+			playerId === session.dealerId &&
+			session.currentRound.phase === "playing" &&
+			session.currentRound.dealerHand
+		) {
+			session.currentRound.dealerHand.hasStood = true;
+		}
+
+		if (
+			session.currentRound.phase === "playing" &&
+			session.currentRound.players.length > 0
+		) {
+			const allActed = session.currentRound.players.every(
+				(p) => p.hasDrawn || p.hasStood,
+			);
+			const dealer = session.currentRound.dealerHand!;
+			if (allActed && (dealer.hasDrawn || dealer.hasStood)) {
+				await resolveRoundInline(session, dbVersion);
+
+				const allLeft = session.players.every((p) => !!p.leftAt);
+				if (allLeft) {
+					session.allDisconnectedAt = session.allDisconnectedAt ?? Date.now();
+				}
+
+				const db = await ensureDb();
+				if (session.phase === "lobby") {
+					await db.execute({
+						sql: "DELETE FROM session_players WHERE session_id = ? AND player_id = ?",
+						args: [sessionId, playerId],
+					});
+				} else {
+					await db.execute({
+						sql: "UPDATE session_players SET connected = 0 WHERE session_id = ? AND player_id = ?",
+						args: [sessionId, playerId],
+					});
+				}
+				return;
+			}
+		}
+
+		if (
+			session.currentRound.phase === "betting" &&
+			session.currentRound.players.length === 0
+		) {
+			session.currentRound = null;
+			session.phase = "reveal";
+		}
 	}
 
 	const allLeft = session.players.every((p) => !!p.leftAt);
@@ -1307,6 +1375,49 @@ export async function castKickVote(
 			) {
 				session.currentRound.dealerHand.hasStood = true;
 			}
+
+			if (
+				session.currentRound.phase === "playing" &&
+				session.currentRound.players.length > 0
+			) {
+				const allActed = session.currentRound.players.every(
+					(p) => p.hasDrawn || p.hasStood,
+				);
+				const dealer = session.currentRound.dealerHand!;
+				if (allActed && (dealer.hasDrawn || dealer.hasStood)) {
+					await resolveRoundInline(session, dbVersion);
+
+					delete session.kickVotes[targetId];
+
+					const allLeft = session.players.every((p) => !!p.leftAt);
+					if (allLeft) {
+						session.allDisconnectedAt = session.allDisconnectedAt ?? Date.now();
+					}
+					kicked = true;
+
+					bump(session);
+					await saveSession(session, dbVersion);
+
+					if (kicked) {
+						await initializeDb();
+						const db = await ensureDb();
+						await db.execute({
+							sql: "UPDATE session_players SET connected = 0 WHERE session_id = ? AND player_id = ?",
+							args: [sessionId, targetId],
+						});
+					}
+
+					return { kicked };
+				}
+			}
+
+			if (
+				session.currentRound.phase === "betting" &&
+				session.currentRound.players.length === 0
+			) {
+				session.currentRound = null;
+				session.phase = "reveal";
+			}
 		}
 
 		delete session.kickVotes[targetId];
@@ -1418,6 +1529,14 @@ export async function removeAfkBettingPlayers(
 			return !sp?.leftAt || p.bet > 0;
 		});
 
+		if (
+			session.currentRound.players.length === 0 &&
+			session.currentRound.phase === "betting"
+		) {
+			session.currentRound = null;
+			session.phase = "reveal";
+		}
+
 		const allLeft = session.players.every((p) => !!p.leftAt);
 		if (allLeft) {
 			session.allDisconnectedAt = session.allDisconnectedAt ?? Date.now();
@@ -1425,6 +1544,18 @@ export async function removeAfkBettingPlayers(
 
 		const dbVersion = await getDbVersion(sessionId);
 		bump(session);
+
+		if (session.currentRound && session.currentRound.phase === "playing") {
+			const allActed = session.currentRound.players.every(
+				(p) => p.hasDrawn || p.hasStood,
+			);
+			const dealer = session.currentRound.dealerHand!;
+			if (allActed && (dealer.hasDrawn || dealer.hasStood)) {
+				await resolveRoundInline(session, dbVersion);
+				return;
+			}
+		}
+
 		await saveSession(session, dbVersion);
 	}
 }

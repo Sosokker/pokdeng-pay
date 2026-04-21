@@ -101,6 +101,7 @@ export interface ClientGameView {
 	sessionId: string;
 	phase: SessionPhase;
 	turnStartedAt?: number;
+	sessionCreatedAt: number;
 	version: number;
 	hostId: string;
 	players: Array<{

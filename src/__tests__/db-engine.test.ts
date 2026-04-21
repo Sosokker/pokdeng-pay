@@ -954,16 +954,14 @@ describe("leaveSession", () => {
 		expect(roundPlayer.hasStood).toBe(true);
 	});
 
-	it("removes unbettted player from round during betting phase", async () => {
+  it("removes unbettted player from round during betting phase", async () => {
 		const { sessionId, playerId } = await setupBettingPhase();
 
 		await leaveSession(sessionId, playerId);
 
 		const stored = JSON.parse(mock.stores.sessions.get(sessionId)!.data);
-		const roundPlayer = stored.currentRound.players.find(
-			(p: any) => p.playerId === playerId,
-		);
-		expect(roundPlayer).toBeUndefined();
+		expect(stored.currentRound).toBeNull();
+		expect(stored.phase).toBe("reveal");
 	});
 });
 
