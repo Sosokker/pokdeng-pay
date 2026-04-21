@@ -881,17 +881,62 @@ export async function leaveSession(
 ): Promise<void> {
 	await initializeDb();
 	const db = await ensureDb();
-	await db.execute({
-		sql: `UPDATE session_players SET connected = 0, last_heartbeat = 0 WHERE session_id = ? AND player_id = ?`,
-		args: [sessionId, playerId],
-	});
 
 	const session = await loadSession(sessionId);
 	if (!session) return;
 	const player = session.players.find((p) => p.id === playerId);
 	if (!player) return;
 
-	if (session.phase !== "lobby") {
+	if (session.phase === "lobby") {
+		const dbVersion = await getDbVersion(sessionId);
+		const fresh = await loadSession(sessionId, dbVersion);
+		if (!fresh) return;
+
+		const wasHost = fresh.hostId === playerId;
+		fresh.players = fresh.players.filter((p) => p.id !== playerId);
+
+		if (wasHost && fresh.players.length > 0) {
+			fresh.hostId = fresh.players[0]!.id;
+			fresh.dealerId = fresh.players[0]!.id;
+			for (const p of fresh.players) {
+				p.isDealer = p.id === fresh.dealerId;
+			}
+		}
+
+		if (fresh.players.length === 0) {
+			await db.batch(
+				[
+					{
+						sql: "DELETE FROM session_players WHERE session_id = ?",
+						args: [sessionId],
+					},
+					{
+						sql: "DELETE FROM session_decks WHERE session_id = ?",
+						args: [sessionId],
+					},
+					{
+						sql: "DELETE FROM settlements WHERE session_id = ?",
+						args: [sessionId],
+					},
+					{ sql: "DELETE FROM sessions WHERE id = ?", args: [sessionId] },
+				],
+				"write",
+			);
+			return;
+		}
+
+		bump(fresh);
+		await saveSession(fresh, dbVersion);
+		await db.execute({
+			sql: "DELETE FROM session_players WHERE session_id = ? AND player_id = ?",
+			args: [sessionId, playerId],
+		});
+	} else {
+		await db.execute({
+			sql: `UPDATE session_players SET connected = 0, last_heartbeat = 0 WHERE session_id = ? AND player_id = ?`,
+			args: [sessionId, playerId],
+		});
+
 		const dbVersion = await getDbVersion(sessionId);
 		const fresh = await loadSession(sessionId, dbVersion);
 		if (!fresh) return;

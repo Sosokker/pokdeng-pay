@@ -259,6 +259,17 @@ const mock = vi.hoisted(() => {
 			return { rows: [], rowsAffected: deleted ? 1 : 0 };
 		}
 
+		if (s === "DELETE FROM session_players WHERE session_id = ?") {
+			let affected = 0;
+			for (const [k, p] of stores.players) {
+				if (p.session_id === a[0]) {
+					stores.players.delete(k);
+					affected++;
+				}
+			}
+			return { rows: [], rowsAffected: affected };
+		}
+
 		if (
 			s.includes(
 				"SET connected = 0 WHERE session_id = ? AND last_heartbeat < ?",
@@ -929,14 +940,16 @@ describe("dealerDraw", () => {
 });
 
 describe("leaveSession", () => {
-	it("disconnects player in lobby without marking leftAt", async () => {
+	it("removes player from session in lobby phase", async () => {
 		const session = await createSession("Host");
 		const { playerId } = await joinSession(session.id, "Alice");
 
 		await leaveSession(session.id, playerId);
 
-		const key = `${session.id}:${playerId}`;
-		expect(mock.stores.players.get(key)!.connected).toBe(0);
+		const stored = JSON.parse(mock.stores.sessions.get(session.id)!.data);
+		const found = stored.players.find((p: any) => p.id === playerId);
+		expect(found).toBeUndefined();
+		expect(mock.stores.players.has(`${session.id}:${playerId}`)).toBe(false);
 	});
 
 	it("marks player as stood during playing phase", async () => {

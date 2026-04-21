@@ -136,7 +136,9 @@ async function runMigrations(db: Client): Promise<void> {
 		(row) => (row.name as string) === "auth_user_id",
 	);
 	if (!hasAuthUserId) {
-		log.info("initializeDb: migrating - adding auth_user_id to session_players");
+		log.info(
+			"initializeDb: migrating - adding auth_user_id to session_players",
+		);
 		await db.execute({
 			sql: "ALTER TABLE session_players ADD COLUMN auth_user_id TEXT NOT NULL DEFAULT ''",
 			args: [],

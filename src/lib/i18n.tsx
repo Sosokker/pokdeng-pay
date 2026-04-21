@@ -87,6 +87,10 @@ const en: TranslationDict = {
 	"game.endSession": "End Session & Settle",
 	"game.waitingNext": "Waiting for host to start next round or end session...",
 	"game.confirmLeave": "Are you sure you want to leave the game mid-round?",
+	"game.confirmKick": (name: string) =>
+		`Are you sure you want to kick ${name} from the game?`,
+	"game.confirmVoteKick": (name: string) =>
+		`Start a vote to kick ${name} from the game?`,
 	"game.you": "(You)",
 	"game.balance": "Balance",
 	"game.turnToDeal": (name: string) => `It's ${name} turn to deal!`,
@@ -248,6 +252,9 @@ const th: TranslationDict = {
 	"game.endSession": "จบเซสชันและคำนวณ",
 	"game.waitingNext": "รอเจ้าของเริ่มรอบใหม่หรือจบเซสชัน...",
 	"game.confirmLeave": "คุณแน่ใจหรือไม่ว่าต้องการออกจากเกมระหว่างเล่น?",
+	"game.confirmKick": (name: string) =>
+		`คุณแน่ใจหรือไม่ว่าต้องการเตะ ${name} ออกจากเกม?`,
+	"game.confirmVoteKick": (name: string) => `เริ่มโหวตเตะ ${name} ออกจากเกม?`,
 	"game.you": "(คุณ)",
 	"game.balance": "ยอดเงิน",
 	"game.turnToDeal": (name: string) => `ถึงตา ${name} แจกไพ่!`,

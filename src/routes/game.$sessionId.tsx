@@ -1,6 +1,7 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { WifiOff } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useConfirmDialog } from "#/components/ConfirmDialog";
 import { DealerArea } from "#/components/game/DealerArea";
 import { GameHeader } from "#/components/game/GameHeader";
 import { HistoryOverlay } from "#/components/game/HistoryOverlay";
@@ -51,6 +52,7 @@ function GamePage() {
 	const { t } = useI18n();
 	const { play, muted, toggleMute } = useSounds();
 	const { user, updatePromptPayId } = useAuth();
+	const confirmDialog = useConfirmDialog();
 
 	const [view, setView] = useState<ClientGameView | null>(null);
 	const [betAmount, setBetAmount] = useState(50);
@@ -358,14 +360,14 @@ function GamePage() {
 		const pid = getPlayerId();
 		const inGame = view?.phase === "betting" || view?.phase === "playing";
 		if (inGame) {
-			if (
-				!window.confirm(
-					t("game.confirmLeave") ||
-						"Are you sure you want to leave the game mid-round?",
-				)
-			) {
-				return;
-			}
+			const ok = await confirmDialog.confirm({
+				title: t("game.leave"),
+				message: t("game.confirmLeave"),
+				confirmLabel: t("game.leave"),
+				cancelLabel: t("lobby.cancel"),
+				variant: "danger",
+			});
+			if (!ok) return;
 		}
 		if (pid) {
 			try {
@@ -380,14 +382,14 @@ function GamePage() {
 	}
 
 	async function handleKickPlayer(targetPlayerId: string, playerName: string) {
-		if (
-			!window.confirm(
-				t("game.confirmKick", { name: playerName }) ||
-					`Are you sure you want to kick ${playerName}?`,
-			)
-		) {
-			return;
-		}
+		const ok = await confirmDialog.confirm({
+			title: t("game.kickPlayer"),
+			message: t("game.confirmKick", playerName),
+			confirmLabel: t("game.kickPlayer"),
+			cancelLabel: t("lobby.cancel"),
+			variant: "danger",
+		});
+		if (!ok) return;
 		try {
 			await handleAction(
 				() =>
@@ -407,9 +409,14 @@ function GamePage() {
 	}
 
 	async function handleVoteKick(targetId: string, playerName: string) {
-		if (!window.confirm(`${t("game.voteKick")} ${playerName}?`)) {
-			return;
-		}
+		const ok = await confirmDialog.confirm({
+			title: t("game.voteKick"),
+			message: t("game.confirmVoteKick", playerName),
+			confirmLabel: t("game.voteKick"),
+			cancelLabel: t("lobby.cancel"),
+			variant: "warning",
+		});
+		if (!ok) return;
 		try {
 			await handleAction(
 				() =>
@@ -763,6 +770,7 @@ function GamePage() {
 				/>
 			)}
 			<RulesModal isOpen={showRules} onClose={() => setShowRules(false)} />
+			{confirmDialog.dialog}
 		</div>
 	);
 }
