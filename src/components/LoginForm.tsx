@@ -2,9 +2,10 @@ import { LogIn, User, Wallet } from "lucide-react";
 import { useState } from "react";
 import { useAuth } from "#/lib/auth";
 import { useI18n } from "#/lib/i18n";
+import { isValidPromptPayId } from "#/lib/promptpay-validator";
 
 export function LoginForm() {
-	const { loginAsGuest, loginWithGoogle, isLoading } = useAuth();
+	const { loginAsGuest, isLoading } = useAuth();
 	const { t } = useI18n();
 	const [name, setName] = useState("");
 	const [promptPayId, setPromptPayId] = useState("");
@@ -22,6 +23,12 @@ export function LoginForm() {
 		}
 		if (name.trim().length > 20) {
 			setError(t("auth.nameTooLong"));
+			return;
+		}
+		if (promptPayId.trim() && !isValidPromptPayId(promptPayId)) {
+			setError(
+				"Invalid PromptPay ID. Must be 10 digits (phone) or 13 digits (Citizen ID)",
+			);
 			return;
 		}
 		setError("");

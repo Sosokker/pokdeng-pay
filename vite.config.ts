@@ -6,7 +6,13 @@ import viteReact from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
 
 const config = defineConfig({
-	resolve: { tsconfigPaths: true },
+	resolve: {
+		tsconfigPaths: true,
+		alias: {
+			"cross-fetch": new URL("./src/lib/cross-fetch-stub.js", import.meta.url)
+				.pathname,
+		},
+	},
 	plugins: [
 		devtools(),
 		cloudflare({ viteEnvironment: { name: "ssr" } }),

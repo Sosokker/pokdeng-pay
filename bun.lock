@@ -6,7 +6,6 @@
       "name": "pokdeng-promptpay",
       "dependencies": {
         "@cloudflare/vite-plugin": "^1.26.0",
-        "@faker-js/faker": "^10.3.0",
         "@libsql/client": "^0.17.2",
         "@tailwindcss/vite": "^4.1.18",
         "@tanstack/match-sorter-utils": "latest",
@@ -31,6 +30,7 @@
       },
       "devDependencies": {
         "@biomejs/biome": "2.4.5",
+        "@faker-js/faker": "^10.4.0",
         "@tailwindcss/typography": "^0.5.16",
         "@tanstack/devtools-event-client": "latest",
         "@tanstack/devtools-vite": "latest",
@@ -44,7 +44,7 @@
         "typescript": "^5.7.2",
         "vite": "^8.0.0",
         "vitest": "^3.0.5",
-        "wrangler": "^4.70.0",
+        "wrangler": "^4.84.0",
       },
     },
   },

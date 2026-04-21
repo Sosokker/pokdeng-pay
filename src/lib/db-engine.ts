@@ -1,19 +1,11 @@
-/**
- * db-engine.ts
- *
- * Drop-in replacement for the session management parts of game-engine.ts.
- * All pure game logic (evaluateHand, compareHands, …) still lives in
- * game-engine.ts.  This module provides the same public API but persists
- * every session to Turso / libSQL instead of an in-process Map.
- *
- * Architecture:
- *  - sessions table  : full GameSession serialised as JSON + expiry metadata
- *  - session_decks   : remaining card deck JSON per session
- *  - session_players : per-player heartbeat, connection status, PromptPay ID
- */
-
+import {
+	ensureDb,
+	initializeDb,
+	markDisconnectedPlayers,
+	ROUND_FORFEIT_TIMEOUT_SECONDS,
+	SESSION_EXPIRY_SECONDS,
+} from "./db";
 import { compareHands, evaluateHand } from "./game-engine";
-import { SESSION_EXPIRY_SECONDS, getDb, initializeDb } from "./db";
 import type {
 	Card,
 	ClientGameView,
@@ -23,49 +15,87 @@ import type {
 	RoundSummary,
 } from "./types";
 
-// ── Internal helpers ─────────────────────────────────────────────────────────
-
 function generateId(): string {
 	const arr = new Uint8Array(8);
 	crypto.getRandomValues(arr);
 	return Array.from(arr, (b) => b.toString(16).padStart(2, "0")).join("");
 }
 
-function nowSeconds(): number {
-	return Math.floor(Date.now() / 1000);
+export function sanitizeName(name: string): string {
+	return name
+		.replace(/[<>&"']/g, "")
+		.trim()
+		.slice(0, 20);
+}
+
+function nowMs(): number {
+	return Date.now();
 }
 
 function expiresAt(): number {
-	return nowSeconds() + SESSION_EXPIRY_SECONDS;
+	return Math.floor(nowMs() / 1000) + SESSION_EXPIRY_SECONDS;
 }
 
-async function loadSession(sessionId: string): Promise<GameSession | null> {
+async function loadSession(
+	sessionId: string,
+	expectedVersion?: number,
+): Promise<GameSession | null> {
 	await initializeDb();
-	const db = getDb();
+	const db = await ensureDb();
 	const rs = await db.execute({
-		sql: "SELECT data FROM sessions WHERE id = ?",
+		sql: "SELECT data, updated_at FROM sessions WHERE id = ?",
 		args: [sessionId],
 	});
 	if (rs.rows.length === 0) return null;
+	const dbVersion = rs.rows[0]!.updated_at as number;
+	if (expectedVersion !== undefined && dbVersion !== expectedVersion) {
+		throw new Error(
+			"CONFLICT: Session was modified by another request. Please retry.",
+		);
+	}
 	return JSON.parse(rs.rows[0]!.data as string) as GameSession;
 }
 
-async function saveSession(session: GameSession): Promise<void> {
-	const db = getDb();
-	const now = nowSeconds();
-	await db.execute({
-		sql: `INSERT INTO sessions (id, data, expires_at, updated_at)
-		      VALUES (?, ?, ?, ?)
-		      ON CONFLICT(id) DO UPDATE SET
-		        data       = excluded.data,
-		        expires_at = excluded.expires_at,
-		        updated_at = excluded.updated_at`,
-		args: [session.id, JSON.stringify(session), expiresAt(), now],
-	});
+async function saveSession(
+	session: GameSession,
+	expectedVersion?: number,
+): Promise<number> {
+	const db = await ensureDb();
+	const version = nowMs();
+	if (expectedVersion !== undefined) {
+		const rs = await db.execute({
+			sql: `UPDATE sessions
+			      SET data = ?, expires_at = ?, updated_at = ?
+			      WHERE id = ? AND updated_at = ?`,
+			args: [
+				JSON.stringify(session),
+				expiresAt(),
+				version,
+				session.id,
+				expectedVersion,
+			],
+		});
+		if (rs.rowsAffected === 0) {
+			throw new Error(
+				"CONFLICT: Session was modified by another request. Please retry.",
+			);
+		}
+	} else {
+		await db.execute({
+			sql: `INSERT INTO sessions (id, data, expires_at, updated_at)
+			      VALUES (?, ?, ?, ?)
+			      ON CONFLICT(id) DO UPDATE SET
+			        data       = excluded.data,
+			        expires_at = excluded.expires_at,
+			        updated_at = excluded.updated_at`,
+			args: [session.id, JSON.stringify(session), expiresAt(), version],
+		});
+	}
+	return version;
 }
 
 async function loadDeck(sessionId: string): Promise<Card[]> {
-	const db = getDb();
+	const db = await ensureDb();
 	const rs = await db.execute({
 		sql: "SELECT deck FROM session_decks WHERE session_id = ?",
 		args: [sessionId],
@@ -75,7 +105,7 @@ async function loadDeck(sessionId: string): Promise<Card[]> {
 }
 
 async function saveDeck(sessionId: string, deck: Card[]): Promise<void> {
-	const db = getDb();
+	const db = await ensureDb();
 	await db.execute({
 		sql: `INSERT INTO session_decks (session_id, deck)
 		      VALUES (?, ?)
@@ -84,37 +114,35 @@ async function saveDeck(sessionId: string, deck: Card[]): Promise<void> {
 	});
 }
 
-async function deleteDeck(sessionId: string): Promise<void> {
-	const db = getDb();
-	await db.execute({
-		sql: "DELETE FROM session_decks WHERE session_id = ?",
-		args: [sessionId],
-	});
-}
-
-/** Upsert a row in session_players (name + connected=1, keep existing promptpay) */
 async function upsertSessionPlayer(
 	sessionId: string,
 	playerId: string,
 	name: string,
+	authUserId?: string,
 ): Promise<void> {
-	const db = getDb();
+	await initializeDb();
+	const db = await ensureDb();
 	await db.execute({
-		sql: `INSERT INTO session_players (session_id, player_id, name, last_heartbeat, connected)
-		      VALUES (?, ?, ?, ?, 1)
+		sql: `INSERT INTO session_players (session_id, player_id, name, auth_user_id, last_heartbeat, connected)
+		      VALUES (?, ?, ?, ?, ?, 1)
 		      ON CONFLICT(session_id, player_id) DO UPDATE SET
 		        name           = excluded.name,
 		        last_heartbeat = excluded.last_heartbeat,
 		        connected      = 1`,
-		args: [sessionId, playerId, name, nowSeconds()],
+		args: [
+			sessionId,
+			playerId,
+			name,
+			authUserId ?? "",
+			Math.floor(nowMs() / 1000),
+		],
 	});
 }
 
-/** Load PromptPay IDs for all players in a session */
 async function loadPromptPayIds(
 	sessionId: string,
 ): Promise<Record<string, string>> {
-	const db = getDb();
+	const db = await ensureDb();
 	const rs = await db.execute({
 		sql: "SELECT player_id, promptpay_id FROM session_players WHERE session_id = ? AND promptpay_id IS NOT NULL",
 		args: [sessionId],
@@ -128,11 +156,10 @@ async function loadPromptPayIds(
 	return map;
 }
 
-/** Load connected status for all players in a session */
 async function loadConnectedStatus(
 	sessionId: string,
 ): Promise<Record<string, boolean>> {
-	const db = getDb();
+	const db = await ensureDb();
 	const rs = await db.execute({
 		sql: "SELECT player_id, connected FROM session_players WHERE session_id = ?",
 		args: [sessionId],
@@ -146,10 +173,8 @@ async function loadConnectedStatus(
 
 function bump(session: GameSession): void {
 	session.version++;
-	session.updatedAt = Date.now();
+	session.updatedAt = nowMs();
 }
-
-// ── Deck helpers (pure) ──────────────────────────────────────────────────────
 
 import type { Rank, Suit } from "./types";
 
@@ -170,41 +195,55 @@ const RANKS: Rank[] = [
 	"K",
 ];
 
-function createDeck(): Card[] {
-	const deck: Card[] = [];
+function createDeckOfSize(size: number): Card[] {
+	const base: Card[] = [];
 	for (const suit of SUITS) {
 		for (const rank of RANKS) {
-			deck.push({ suit, rank });
+			base.push({ suit, rank });
 		}
 	}
-	return deck;
+	while (base.length < size) {
+		for (const suit of SUITS) {
+			for (const rank of RANKS) {
+				base.push({ suit, rank });
+				if (base.length >= size) return base;
+			}
+		}
+	}
+	return base;
 }
 
 function shuffleDeck(deck: Card[]): Card[] {
 	const shuffled = [...deck];
-	const randomValues = new Uint32Array(shuffled.length);
-	crypto.getRandomValues(randomValues);
-	for (let i = shuffled.length - 1; i > 0; i--) {
-		const j = randomValues[i]! % (i + 1);
+	const len = shuffled.length;
+	for (let i = len - 1; i > 0; i--) {
+		let j: number;
+		const limit = 0x100000000 - (0x100000000 % (i + 1));
+		const arr = new Uint32Array(1);
+		do {
+			crypto.getRandomValues(arr);
+			j = arr[0]!;
+		} while (j >= limit);
+		j = j % (i + 1);
 		[shuffled[i], shuffled[j]] = [shuffled[j]!, shuffled[i]!];
 	}
 	return shuffled;
 }
 
-// ── Public API ───────────────────────────────────────────────────────────────
-
 export async function createSession(
 	hostName: string,
 	config?: Partial<GameConfig>,
+	authUserId?: string,
 ): Promise<GameSession> {
 	await initializeDb();
 	const hostId = generateId();
 	const sessionId = generateId();
-	const now = Date.now();
+	const now = nowMs();
+	const safeName = sanitizeName(hostName);
 	const session: GameSession = {
 		id: sessionId,
 		hostId,
-		players: [{ id: hostId, name: hostName, isDealer: true }],
+		players: [{ id: hostId, name: safeName, isDealer: true }],
 		dealerId: hostId,
 		currentRound: null,
 		roundHistory: [],
@@ -215,7 +254,7 @@ export async function createSession(
 		updatedAt: now,
 	};
 	await saveSession(session);
-	await upsertSessionPlayer(sessionId, hostId, hostName);
+	await upsertSessionPlayer(sessionId, hostId, safeName, authUserId);
 	return session;
 }
 
@@ -223,6 +262,8 @@ export async function joinSession(
 	sessionId: string,
 	playerName: string,
 	promptPayId?: string,
+	existingPlayerId?: string,
+	authUserId?: string,
 ): Promise<{ session: GameSession; playerId: string }> {
 	const session = await loadSession(sessionId);
 	if (!session) throw new Error("Session not found");
@@ -230,18 +271,52 @@ export async function joinSession(
 	if (session.players.length >= 17)
 		throw new Error("Session full (max 17 players)");
 
-	const playerId = generateId();
-	session.players.push({ id: playerId, name: playerName, isDealer: false });
-	bump(session);
-	await saveSession(session);
-	await upsertSessionPlayer(sessionId, playerId, playerName);
+	const version = await getDbVersion(sessionId);
+	const safeName = sanitizeName(playerName);
 
-	// Store PromptPay ID if provided at join time
+	if (existingPlayerId) {
+		const existing = session.players.find((p) => p.id === existingPlayerId);
+		if (existing) {
+			await upsertSessionPlayer(
+				sessionId,
+				existingPlayerId,
+				existing.name,
+				authUserId,
+			);
+			if (promptPayId?.trim()) {
+				await setPlayerPromptPayId(
+					sessionId,
+					existingPlayerId,
+					promptPayId.trim(),
+				);
+			}
+			return { session, playerId: existingPlayerId };
+		}
+	}
+
+	if (safeName.length < 2) throw new Error("Name too short after sanitization");
+
+	const playerId = generateId();
+	session.players.push({ id: playerId, name: safeName, isDealer: false });
+	bump(session);
+	await saveSession(session, version);
+	await upsertSessionPlayer(sessionId, playerId, safeName, authUserId);
+
 	if (promptPayId?.trim()) {
 		await setPlayerPromptPayId(sessionId, playerId, promptPayId.trim());
 	}
 
 	return { session, playerId };
+}
+
+async function getDbVersion(sessionId: string): Promise<number> {
+	const db = await ensureDb();
+	const rs = await db.execute({
+		sql: "SELECT updated_at FROM sessions WHERE id = ?",
+		args: [sessionId],
+	});
+	if (rs.rows.length === 0) throw new Error("Session not found");
+	return rs.rows[0]!.updated_at as number;
 }
 
 export async function getSession(
@@ -254,8 +329,8 @@ export async function listSessions(): Promise<
 	Array<{ id: string; hostName: string; playerCount: number; phase: string }>
 > {
 	await initializeDb();
-	const db = getDb();
-	const now = nowSeconds();
+	const db = await ensureDb();
+	const now = Math.floor(nowMs() / 1000);
 	const rs = await db.execute({
 		sql: "SELECT data FROM sessions WHERE expires_at > ? ORDER BY rowid DESC LIMIT 50",
 		args: [now],
@@ -276,14 +351,45 @@ export async function startBetting(
 	sessionId: string,
 	playerId: string,
 ): Promise<void> {
+	const dbVersion = await getDbVersion(sessionId);
 	const session = await loadSession(sessionId);
 	if (!session) throw new Error("Session not found");
-	if (session.hostId !== playerId) throw new Error("Only host can start");
 	if (session.players.length < 2) throw new Error("Need at least 2 players");
+
+	if (
+		session.currentRound &&
+		session.currentRound.phase !== "reveal" &&
+		session.phase !== "lobby"
+	) {
+		throw new Error("Current round must be completed first");
+	}
+
+	const isDealer = playerId === session.dealerId;
+	const isFirstRound = session.roundHistory.length === 0;
+	if (isFirstRound && session.hostId !== playerId)
+		throw new Error("Only host can start the first round");
+	if (!isFirstRound && !isDealer)
+		throw new Error("Only dealer can start the next round");
+
+	if (session.roundHistory.length > 0) {
+		const activePlayers = session.players.filter((p) => !p.leftAt);
+		if (activePlayers.length < 2)
+			throw new Error("Need at least 2 active players");
+
+		const prevDealerIdx = activePlayers.findIndex(
+			(p) => p.id === session.dealerId,
+		);
+		const nextDealerIdx =
+			prevDealerIdx >= 0 ? (prevDealerIdx + 1) % activePlayers.length : 0;
+		for (const p of session.players) {
+			p.isDealer = p.id === activePlayers[nextDealerIdx]!.id;
+		}
+		session.dealerId = activePlayers[nextDealerIdx]!.id;
+	}
 
 	const roundNumber = session.roundHistory.length + 1;
 	const players: PlayerInRound[] = session.players
-		.filter((p) => !p.isDealer)
+		.filter((p) => !p.isDealer && !p.leftAt)
 		.map((p) => ({
 			playerId: p.id,
 			cards: [],
@@ -305,10 +411,11 @@ export async function startBetting(
 		phase: "betting",
 		players,
 		dealerHand: dealerPlayer,
+		startedAt: nowMs(),
 	};
 	session.phase = "betting";
 	bump(session);
-	await saveSession(session);
+	await saveSession(session, dbVersion);
 }
 
 export async function placeBet(
@@ -316,6 +423,7 @@ export async function placeBet(
 	playerId: string,
 	amount: number,
 ): Promise<void> {
+	const dbVersion = await getDbVersion(sessionId);
 	const session = await loadSession(sessionId);
 	if (!session?.currentRound) throw new Error("No active round");
 	if (session.currentRound.phase !== "betting")
@@ -325,25 +433,33 @@ export async function placeBet(
 		(p) => p.playerId === playerId,
 	);
 	if (!player) throw new Error("Player not in round");
-	if (amount <= 0 || amount > 1000) throw new Error("Invalid bet amount");
+	if (player.bet > 0) throw new Error("Bet already placed");
+	if (!Number.isInteger(amount) || amount <= 0 || amount > 1000)
+		throw new Error("Invalid bet amount");
 
 	player.bet = amount;
 	bump(session);
-	await saveSession(session);
+	await saveSession(session, dbVersion);
 }
 
 export async function dealCards(
 	sessionId: string,
 	playerId: string,
 ): Promise<void> {
+	const dbVersion = await getDbVersion(sessionId);
 	const session = await loadSession(sessionId);
 	if (!session?.currentRound) throw new Error("No active round");
-	if (session.hostId !== playerId) throw new Error("Only host can deal");
+	if (session.dealerId !== playerId) throw new Error("Only dealer can deal");
 
 	const allBet = session.currentRound.players.every((p) => p.bet > 0);
 	if (!allBet) throw new Error("Not all players have placed bets");
+	if (session.currentRound.players.length === 0)
+		throw new Error("No players to deal to");
 
-	const deck = shuffleDeck(createDeck());
+	const numPlayers = session.currentRound.players.length;
+	const totalHands = numPlayers + 1;
+	const deckSize = Math.max(totalHands * 3, 52);
+	const deck = shuffleDeck(createDeckOfSize(deckSize));
 	let cardIndex = 0;
 
 	for (const player of session.currentRound.players) {
@@ -361,7 +477,6 @@ export async function dealCards(
 	session.phase = "playing";
 	bump(session);
 
-	// Check for automatic pok resolution before saving
 	const evalOpts = {
 		allowAceHighStraight: session.config.allowAceHighStraight,
 	};
@@ -387,22 +502,21 @@ export async function dealCards(
 		}
 	}
 
+	await saveDeck(sessionId, deck.slice(cardIndex));
+
 	if (shouldResolve) {
-		// Run resolve inline without re-loading
-		await saveSession(session);
-		await saveDeck(sessionId, deck.slice(cardIndex));
-		await resolveRoundInline(session);
+		await resolveRoundInline(session, dbVersion);
 		return;
 	}
 
-	await saveDeck(sessionId, deck.slice(cardIndex));
-	await saveSession(session);
+	await saveSession(session, dbVersion);
 }
 
 export async function drawCard(
 	sessionId: string,
 	playerId: string,
 ): Promise<Card> {
+	const dbVersion = await getDbVersion(sessionId);
 	const session = await loadSession(sessionId);
 	if (!session?.currentRound) throw new Error("No active round");
 	if (session.currentRound.phase !== "playing")
@@ -428,19 +542,18 @@ export async function drawCard(
 	player.hasDrawn = true;
 	bump(session);
 
-	// Check if all players + dealer have acted
+	await saveDeck(sessionId, deck);
+
 	const allActed = session.currentRound.players.every(
 		(p) => p.hasDrawn || p.hasStood,
 	);
 	const dealer = session.currentRound.dealerHand!;
 	if (allActed && (dealer.hasDrawn || dealer.hasStood)) {
-		await saveDeck(sessionId, deck);
-		await resolveRoundInline(session);
+		await resolveRoundInline(session, dbVersion);
 		return card;
 	}
 
-	await saveDeck(sessionId, deck);
-	await saveSession(session);
+	await saveSession(session, dbVersion);
 	return card;
 }
 
@@ -448,6 +561,7 @@ export async function stand(
 	sessionId: string,
 	playerId: string,
 ): Promise<void> {
+	const dbVersion = await getDbVersion(sessionId);
 	const session = await loadSession(sessionId);
 	if (!session?.currentRound) throw new Error("No active round");
 	if (session.currentRound.phase !== "playing")
@@ -468,17 +582,18 @@ export async function stand(
 	);
 	const dealer = session.currentRound.dealerHand!;
 	if (allActed && (dealer.hasDrawn || dealer.hasStood)) {
-		await resolveRoundInline(session);
+		await resolveRoundInline(session, dbVersion);
 		return;
 	}
 
-	await saveSession(session);
+	await saveSession(session, dbVersion);
 }
 
 export async function dealerDraw(
 	sessionId: string,
 	playerId: string,
 ): Promise<Card> {
+	const dbVersion = await getDbVersion(sessionId);
 	const session = await loadSession(sessionId);
 	if (!session?.currentRound) throw new Error("No active round");
 	if (playerId !== session.dealerId) throw new Error("Not the dealer");
@@ -501,13 +616,25 @@ export async function dealerDraw(
 	bump(session);
 
 	await saveDeck(sessionId, deck);
-	await saveSession(session);
+
+	const allActed = session.currentRound.players.every(
+		(p) => p.hasDrawn || p.hasStood,
+	);
+	if (allActed) {
+		await resolveRoundInline(session, dbVersion);
+		return card;
+	}
+
+	await saveSession(session, dbVersion);
 	return card;
 }
 
-/** Resolve the round inline (no extra DB load) */
-async function resolveRoundInline(session: GameSession): Promise<void> {
+async function resolveRoundInline(
+	session: GameSession,
+	dbVersion: number,
+): Promise<void> {
 	if (!session.currentRound) return;
+	if (session.currentRound.phase === "reveal") return;
 
 	const evalOpts = {
 		allowAceHighStraight: session.config.allowAceHighStraight,
@@ -538,6 +665,7 @@ async function resolveRoundInline(session: GameSession): Promise<void> {
 
 	session.roundHistory.push({
 		roundNumber: session.currentRound.roundNumber,
+		dealerId: session.dealerId,
 		dealerTaem: dealerResult.score,
 		dealerHandType: dealerResult.handType,
 		dealerDeng: dealerResult.deng,
@@ -547,20 +675,28 @@ async function resolveRoundInline(session: GameSession): Promise<void> {
 	session.currentRound.phase = "reveal";
 	session.phase = "reveal";
 	bump(session);
-	await saveSession(session);
+	await saveSession(session, dbVersion);
 }
 
-export async function resolveRound(sessionId: string): Promise<void> {
+export async function resolveRound(
+	sessionId: string,
+	playerId: string,
+): Promise<void> {
+	const dbVersion = await getDbVersion(sessionId);
 	const session = await loadSession(sessionId);
 	if (!session) throw new Error("Session not found");
-	await resolveRoundInline(session);
+	if (session.hostId !== playerId) throw new Error("Only host can resolve");
+	await resolveRoundInline(session, dbVersion);
 }
 
 export async function endSession(
 	sessionId: string,
+	playerId: string,
 ): Promise<Record<string, { name: string; balance: number }>> {
+	const dbVersion = await getDbVersion(sessionId);
 	const session = await loadSession(sessionId);
 	if (!session) throw new Error("Session not found");
+	if (session.hostId !== playerId) throw new Error("Only host can end session");
 
 	const balances: Record<string, { name: string; balance: number }> = {};
 	for (const p of session.players) {
@@ -568,19 +704,22 @@ export async function endSession(
 	}
 
 	for (const round of session.roundHistory) {
+		const roundDealerId = round.dealerId;
 		for (const result of round.results) {
 			if (balances[result.playerId]) {
 				balances[result.playerId].balance += result.netAmount;
 			}
-			if (balances[session.dealerId]) {
-				balances[session.dealerId].balance -= result.netAmount;
+			if (balances[roundDealerId]) {
+				balances[roundDealerId].balance -= result.netAmount;
 			}
 		}
 	}
 
 	session.phase = "ended";
 	bump(session);
-	await saveSession(session);
+	await saveSession(session, dbVersion);
+	const authUserIds = await loadAuthUserIds(session.id);
+	await saveSessionHistory(session, balances, authUserIds);
 	return balances;
 }
 
@@ -591,18 +730,31 @@ export async function getClientView(
 	const session = await loadSession(sessionId);
 	if (!session) throw new Error("Session not found");
 
-	// Touch heartbeat + mark reconnected
 	await db_heartbeat(sessionId, playerId);
+	await markDisconnectedPlayers(sessionId);
+	await forceForfeitDisconnectedPlayers(sessionId);
+	await removeAfkBettingPlayers(sessionId);
+	await transferHostIfNeeded(sessionId);
 
-	const round = session.currentRound;
+	const autoClosed = await checkAutoClose(sessionId);
+	if (autoClosed) {
+		throw new Error("Session not found");
+	}
+
+	const refreshedSession = await loadSession(sessionId);
+	if (!refreshedSession) throw new Error("Session not found");
+	const s = refreshedSession;
+
+	const round = s.currentRound;
 	const isReveal = round?.phase === "reveal";
 
 	const promptPayIds = await loadPromptPayIds(sessionId);
 	const connectedStatus = await loadConnectedStatus(sessionId);
+	const emojis = await loadEmojis(sessionId);
 
-	const players = session.players.map((p) => {
+	const players = s.players.map((p) => {
 		const roundPlayer = round?.players.find((rp) => rp.playerId === p.id);
-		const isDealer = p.id === session.dealerId;
+		const isDealer = p.id === s.dealerId;
 		const dealerData = isDealer ? round?.dealerHand : undefined;
 		const data = isDealer ? dealerData : roundPlayer;
 		const isMe = p.id === playerId;
@@ -612,6 +764,7 @@ export async function getClientView(
 			id: p.id,
 			name: p.name,
 			isDealer,
+			isHost: p.id === s.hostId,
 			cardCount: data?.cards.length ?? 0,
 			hasDrawn: data?.hasDrawn ?? false,
 			hasStood: data?.hasStood ?? false,
@@ -621,78 +774,651 @@ export async function getClientView(
 			bet: data?.bet ?? 0,
 			promptPayId: promptPayIds[p.id],
 			connected: connectedStatus[p.id] ?? false,
+			emoji: emojis[p.id],
+			leftAt: p.leftAt,
 		};
 	});
 
 	const myRoundData = round?.players.find((rp) => rp.playerId === playerId);
-	const amDealer = playerId === session.dealerId;
+	const amDealer = playerId === s.dealerId;
 	const myDealerData = amDealer ? round?.dealerHand : undefined;
 	const myData = amDealer ? myDealerData : myRoundData;
 
 	const cumulativeBalances: Record<string, number> = {};
-	for (const p of session.players) cumulativeBalances[p.id] = 0;
-	for (const r of session.roundHistory) {
+	for (const p of s.players) cumulativeBalances[p.id] = 0;
+	for (const r of s.roundHistory) {
+		const roundDealerId = r.dealerId;
 		for (const result of r.results) {
 			if (cumulativeBalances[result.playerId] !== undefined) {
 				cumulativeBalances[result.playerId] += result.netAmount;
 			}
-			if (cumulativeBalances[session.dealerId] !== undefined) {
-				cumulativeBalances[session.dealerId] -= result.netAmount;
+			if (cumulativeBalances[roundDealerId] !== undefined) {
+				cumulativeBalances[roundDealerId] -= result.netAmount;
 			}
 		}
 	}
 
 	return {
 		sessionId,
-		phase: session.phase,
-		version: session.version,
+		phase: s.phase,
+		turnStartedAt: round?.startedAt,
+		version: s.version,
+		hostId: s.hostId,
 		players,
 		myCards: myData?.cards ?? [],
 		myResult: isReveal ? myData?.result : undefined,
 		roundNumber: round?.roundNumber ?? 0,
-		roundHistory: session.roundHistory,
+		roundHistory: s.roundHistory,
 		cumulativeBalances,
 		playerPromptPayIds: promptPayIds,
+		kickVotes: s.kickVotes ?? {},
 	};
 }
 
-export async function removeSession(sessionId: string): Promise<void> {
-	const db = getDb();
-	await db.execute({
-		sql: "DELETE FROM sessions WHERE id = ?",
-		args: [sessionId],
+export async function verifyPlayerInSession(
+	sessionId: string,
+	playerId: string,
+): Promise<boolean> {
+	await initializeDb();
+	const db = await ensureDb();
+	const rs = await db.execute({
+		sql: "SELECT 1 FROM session_players WHERE session_id = ? AND player_id = ?",
+		args: [sessionId, playerId],
 	});
+	return rs.rows.length > 0;
 }
 
-// ── Heartbeat & PromptPay ────────────────────────────────────────────────────
+export async function leaveSession(
+	sessionId: string,
+	playerId: string,
+): Promise<void> {
+	await initializeDb();
+	const db = await ensureDb();
+	await db.execute({
+		sql: `UPDATE session_players SET connected = 0, last_heartbeat = 0 WHERE session_id = ? AND player_id = ?`,
+		args: [sessionId, playerId],
+	});
 
-/** Update last_heartbeat and re-mark connected for a player */
+	const session = await loadSession(sessionId);
+	if (!session) return;
+	const player = session.players.find((p) => p.id === playerId);
+	if (!player) return;
+
+	if (session.phase !== "lobby") {
+		const dbVersion = await getDbVersion(sessionId);
+		const fresh = await loadSession(sessionId, dbVersion);
+		if (!fresh) return;
+		const fp = fresh.players.find((p) => p.id === playerId);
+		if (!fp) return;
+		fp.leftAt = Date.now();
+
+		if (fresh.currentRound?.phase === "betting") {
+			const inRound = fresh.currentRound.players.find(
+				(p) => p.playerId === playerId,
+			);
+			if (inRound && inRound.bet === 0) {
+				fresh.currentRound.players = fresh.currentRound.players.filter(
+					(p) => p.playerId !== playerId,
+				);
+			}
+		} else if (fresh.currentRound?.phase === "playing") {
+			const inRound = fresh.currentRound.players.find(
+				(p) => p.playerId === playerId,
+			);
+			if (inRound) {
+				inRound.hasStood = true;
+			}
+			if (playerId === fresh.dealerId && fresh.currentRound.dealerHand) {
+				fresh.currentRound.dealerHand.hasStood = true;
+			}
+		}
+
+		bump(fresh);
+		await saveSession(fresh, dbVersion);
+	}
+}
+
+export async function removeSession(sessionId: string): Promise<void> {
+	const db = await ensureDb();
+	await db.batch(
+		[
+			{
+				sql: "DELETE FROM session_decks WHERE session_id = ?",
+				args: [sessionId],
+			},
+			{
+				sql: "DELETE FROM settlements WHERE session_id = ?",
+				args: [sessionId],
+			},
+			{
+				sql: "DELETE FROM session_players WHERE session_id = ?",
+				args: [sessionId],
+			},
+			{
+				sql: "DELETE FROM sessions WHERE id = ?",
+				args: [sessionId],
+			},
+		],
+		"write",
+	);
+}
+
+export async function forceForfeitDisconnectedPlayers(
+	sessionId: string,
+): Promise<number> {
+	const session = await loadSession(sessionId);
+	if (!session?.currentRound) return 0;
+	if (session.currentRound.phase !== "playing") return 0;
+
+	const elapsed = nowMs() - session.currentRound.startedAt;
+	if (elapsed < ROUND_FORFEIT_TIMEOUT_SECONDS * 1000) return 0;
+
+	const connected = await loadConnectedStatus(sessionId);
+	let forfeited = 0;
+	const dbVersion = await getDbVersion(sessionId);
+	const freshSession = await loadSession(sessionId, dbVersion);
+	if (
+		!freshSession?.currentRound ||
+		freshSession.currentRound.phase !== "playing"
+	)
+		return 0;
+
+	for (const player of freshSession.currentRound.players) {
+		if (player.hasDrawn || player.hasStood) continue;
+		if (!connected[player.playerId]) {
+			player.hasStood = true;
+			forfeited++;
+		}
+	}
+
+	const dealer = freshSession.currentRound.dealerHand!;
+	if (
+		!dealer.hasDrawn &&
+		!dealer.hasStood &&
+		!connected[freshSession.dealerId] &&
+		elapsed >= ROUND_FORFEIT_TIMEOUT_SECONDS * 1000
+	) {
+		dealer.hasStood = true;
+		forfeited++;
+	}
+
+	const allActed = freshSession.currentRound.players.every(
+		(p) => p.hasDrawn || p.hasStood,
+	);
+
+	if (forfeited > 0) {
+		bump(freshSession);
+		if (allActed && (dealer.hasDrawn || dealer.hasStood)) {
+			await resolveRoundInline(freshSession, dbVersion);
+		} else {
+			await saveSession(freshSession, dbVersion);
+		}
+	}
+
+	return forfeited;
+}
+
+async function transferHostIfNeeded(sessionId: string): Promise<void> {
+	const session = await loadSession(sessionId);
+	if (!session) return;
+
+	const connected = await loadConnectedStatus(sessionId);
+	if (connected[session.hostId]) return;
+
+	const connectedPlayers = session.players.filter(
+		(p) => p.id !== session.hostId && connected[p.id],
+	);
+	if (connectedPlayers.length === 0) return;
+
+	const newHost = connectedPlayers[0]!;
+	const dbVersion = await getDbVersion(sessionId);
+	const freshSession = await loadSession(sessionId, dbVersion);
+	if (!freshSession) return;
+	if (freshSession.hostId !== session.hostId) return;
+
+	const freshConnected = await loadConnectedStatus(sessionId);
+	if (freshConnected[freshSession.hostId]) return;
+
+	freshSession.hostId = newHost.id;
+	bump(freshSession);
+	await saveSession(freshSession, dbVersion);
+}
+
 export async function db_heartbeat(
 	sessionId: string,
 	playerId: string,
 ): Promise<void> {
 	await initializeDb();
-	const db = getDb();
+	const db = await ensureDb();
 	await db.execute({
 		sql: `UPDATE session_players
 		      SET last_heartbeat = ?, connected = 1
 		      WHERE session_id = ? AND player_id = ?`,
-		args: [nowSeconds(), sessionId, playerId],
+		args: [Math.floor(nowMs() / 1000), sessionId, playerId],
 	});
 }
 
-/** Persist a player's PromptPay ID for this session */
 export async function setPlayerPromptPayId(
 	sessionId: string,
 	playerId: string,
 	promptPayId: string,
 ): Promise<void> {
 	await initializeDb();
-	const db = getDb();
+	const db = await ensureDb();
 	await db.execute({
 		sql: `UPDATE session_players
 		      SET promptpay_id = ?
 		      WHERE session_id = ? AND player_id = ?`,
 		args: [promptPayId || null, sessionId, playerId],
 	});
+}
+
+export type SettlementStatus = "pending" | "confirmed" | "disputed";
+
+export async function upsertSettlement(
+	sessionId: string,
+	payerId: string,
+	recipientId: string,
+	amount: number,
+	status: SettlementStatus,
+): Promise<void> {
+	await initializeDb();
+	const db = await ensureDb();
+	await db.execute({
+		sql: `INSERT INTO settlements (session_id, payer_id, recipient_id, amount, status, updated_at)
+		      VALUES (?, ?, ?, ?, ?, unixepoch())
+		      ON CONFLICT(session_id, payer_id, recipient_id) DO UPDATE SET
+		        status = excluded.status,
+		        updated_at = excluded.updated_at`,
+		args: [sessionId, payerId, recipientId, amount, status],
+	});
+}
+
+export async function loadSettlements(sessionId: string): Promise<
+	Array<{
+		payerId: string;
+		recipientId: string;
+		amount: number;
+		status: SettlementStatus;
+	}>
+> {
+	await initializeDb();
+	const db = await ensureDb();
+	const rs = await db.execute({
+		sql: "SELECT payer_id, recipient_id, amount, status FROM settlements WHERE session_id = ?",
+		args: [sessionId],
+	});
+	return rs.rows.map((row) => ({
+		payerId: row.payer_id as string,
+		recipientId: row.recipient_id as string,
+		amount: row.amount as number,
+		status: row.status as SettlementStatus,
+	}));
+}
+
+export async function removePlayer(
+	sessionId: string,
+	playerId: string,
+): Promise<void> {
+	await initializeDb();
+	const dbVersion = await getDbVersion(sessionId);
+	const session = await loadSession(sessionId, dbVersion);
+	if (!session) return;
+
+	const player = session.players.find((p) => p.id === playerId);
+	if (!player) return;
+
+	if (session.phase === "lobby") {
+		session.players = session.players.filter((p) => p.id !== playerId);
+	} else {
+		player.leftAt = Date.now();
+	}
+
+	if (session.currentRound) {
+		const inRound = session.currentRound.players.find(
+			(p) => p.playerId === playerId,
+		);
+		if (
+			inRound &&
+			inRound.bet === 0 &&
+			session.currentRound.phase === "betting"
+		) {
+			session.currentRound.players = session.currentRound.players.filter(
+				(p) => p.playerId !== playerId,
+			);
+		} else if (inRound && session.currentRound.phase === "playing") {
+			inRound.hasStood = true;
+		}
+	}
+
+	const allLeft = session.players.every((p) => !!p.leftAt);
+	if (allLeft) {
+		session.allDisconnectedAt = session.allDisconnectedAt ?? Date.now();
+	}
+
+	bump(session);
+	await saveSession(session, dbVersion);
+
+	const db = await ensureDb();
+	if (session.phase === "lobby") {
+		await db.execute({
+			sql: "DELETE FROM session_players WHERE session_id = ? AND player_id = ?",
+			args: [sessionId, playerId],
+		});
+	} else {
+		await db.execute({
+			sql: "UPDATE session_players SET connected = 0 WHERE session_id = ? AND player_id = ?",
+			args: [sessionId, playerId],
+		});
+	}
+}
+
+export async function sendEmoji(
+	sessionId: string,
+	playerId: string,
+	emoji: string,
+): Promise<void> {
+	await initializeDb();
+	const db = await ensureDb();
+	const now = Date.now();
+	await db.execute({
+		sql: `INSERT INTO emojis (session_id, player_id, emoji, updated_at) VALUES (?, ?, ?, ?) ON CONFLICT(session_id, player_id) DO UPDATE SET emoji = excluded.emoji, updated_at = excluded.updated_at`,
+		args: [sessionId, playerId, emoji, now],
+	});
+	await db.execute({
+		sql: "UPDATE sessions SET updated_at = ? WHERE id = ?",
+		args: [now, sessionId],
+	});
+}
+
+export async function saveSessionHistory(
+	session: GameSession,
+	balances: Record<string, { name: string; balance: number }>,
+	authUserIds: Record<string, string>,
+): Promise<void> {
+	await initializeDb();
+	const db = await ensureDb();
+	const now = Math.floor(Date.now() / 1000);
+	const summary = JSON.stringify(session.roundHistory);
+	const balancesJson = JSON.stringify(balances);
+
+	for (const player of session.players) {
+		const authId = authUserIds[player.id] ?? "";
+		await db.execute({
+			sql: `INSERT INTO session_history (id, player_id, auth_user_id, player_name, summary, balances, created_at)
+			      VALUES (?, ?, ?, ?, ?, ?, ?)`,
+			args: [
+				`${session.id}_${player.id}`,
+				player.id,
+				authId,
+				player.name,
+				summary,
+				balancesJson,
+				now,
+			],
+		});
+	}
+}
+
+async function loadAuthUserIds(
+	sessionId: string,
+): Promise<Record<string, string>> {
+	await initializeDb();
+	const db = await ensureDb();
+	const rs = await db.execute({
+		sql: "SELECT player_id, auth_user_id FROM session_players WHERE session_id = ? AND auth_user_id != ''",
+		args: [sessionId],
+	});
+	const map: Record<string, string> = {};
+	for (const row of rs.rows) {
+		if (row.player_id && row.auth_user_id) {
+			map[row.player_id as string] = row.auth_user_id as string;
+		}
+	}
+	return map;
+}
+
+export async function getPlayerHistory(authUserId: string): Promise<
+	Array<{
+		id: string;
+		playerName: string;
+		summary: import("./types").RoundSummary[];
+		balances: Record<string, { name: string; balance: number }>;
+		createdAt: number;
+	}>
+> {
+	await initializeDb();
+	const db = await ensureDb();
+	const rs = await db.execute({
+		sql: "SELECT id, player_name, summary, balances, created_at FROM session_history WHERE auth_user_id = ? ORDER BY created_at DESC LIMIT 20",
+		args: [authUserId],
+	});
+	return rs.rows.map((row) => ({
+		id: row.id as string,
+		playerName: row.player_name as string,
+		summary: JSON.parse(
+			row.summary as string,
+		) as import("./types").RoundSummary[],
+		balances: JSON.parse(row.balances as string) as Record<
+			string,
+			{ name: string; balance: number }
+		>,
+		createdAt: row.created_at as number,
+	}));
+}
+
+export async function castKickVote(
+	sessionId: string,
+	voterId: string,
+	targetId: string,
+): Promise<{ kicked: boolean }> {
+	const dbVersion = await getDbVersion(sessionId);
+	const session = await loadSession(sessionId, dbVersion);
+	if (!session) throw new Error("Session not found");
+
+	const voter = session.players.find((p) => p.id === voterId && !p.leftAt);
+	if (!voter) throw new Error("Voter not in session");
+
+	const target = session.players.find((p) => p.id === targetId);
+	if (!target) throw new Error("Target not in session");
+	if (targetId === voterId) throw new Error("Cannot vote to kick yourself");
+
+	if (!session.kickVotes) session.kickVotes = {};
+	if (!session.kickVotes[targetId]) session.kickVotes[targetId] = [];
+
+	const voters = session.kickVotes[targetId]!;
+	if (voters.includes(voterId)) throw new Error("Already voted");
+
+	voters.push(voterId);
+
+	const activePlayers = session.players.filter((p) => !p.leftAt);
+	const majority = Math.ceil(activePlayers.length / 2);
+	let kicked = false;
+
+	if (voters.length >= majority) {
+		target.leftAt = Date.now();
+
+		if (session.currentRound) {
+			const inRound = session.currentRound.players.find(
+				(p) => p.playerId === targetId,
+			);
+			if (
+				inRound &&
+				inRound.bet === 0 &&
+				session.currentRound.phase === "betting"
+			) {
+				session.currentRound.players = session.currentRound.players.filter(
+					(p) => p.playerId !== targetId,
+				);
+			} else if (inRound && session.currentRound.phase === "playing") {
+				inRound.hasStood = true;
+			}
+
+			if (
+				targetId === session.dealerId &&
+				session.currentRound.phase === "playing" &&
+				session.currentRound.dealerHand
+			) {
+				session.currentRound.dealerHand.hasStood = true;
+			}
+		}
+
+		delete session.kickVotes[targetId];
+
+		const allLeft = session.players.every((p) => !!p.leftAt);
+		if (allLeft) {
+			session.allDisconnectedAt = session.allDisconnectedAt ?? Date.now();
+		}
+		kicked = true;
+	}
+
+	bump(session);
+	await saveSession(session, dbVersion);
+
+	if (kicked) {
+		await initializeDb();
+		const db = await ensureDb();
+		await db.execute({
+			sql: "UPDATE session_players SET connected = 0 WHERE session_id = ? AND player_id = ?",
+			args: [sessionId, targetId],
+		});
+	}
+
+	return { kicked };
+}
+
+export async function checkAutoClose(sessionId: string): Promise<boolean> {
+	const session = await loadSession(sessionId);
+	if (!session || session.phase === "ended") return false;
+
+	const connected = await loadConnectedStatus(sessionId);
+	const anyConnected = session.players.some(
+		(p) => !p.leftAt && connected[p.id],
+	);
+
+	if (anyConnected) {
+		if (session.allDisconnectedAt) {
+			const dbVersion = await getDbVersion(sessionId);
+			const fresh = await loadSession(sessionId, dbVersion);
+			if (fresh) {
+				delete fresh.allDisconnectedAt;
+				bump(fresh);
+				await saveSession(fresh, dbVersion);
+			}
+		}
+		return false;
+	}
+
+	const allLeftOrDisconnected = session.players.every(
+		(p) => !!p.leftAt || !connected[p.id],
+	);
+	if (!allLeftOrDisconnected) return false;
+
+	const now = Date.now();
+	const dbVersion = await getDbVersion(sessionId);
+	const fresh = await loadSession(sessionId, dbVersion);
+	if (!fresh) return false;
+
+	if (!fresh.allDisconnectedAt) {
+		fresh.allDisconnectedAt = now;
+		bump(fresh);
+		await saveSession(fresh, dbVersion);
+		return false;
+	}
+
+	if (now - fresh.allDisconnectedAt >= 60_000) {
+		if (fresh.roundHistory.length > 0 && fresh.phase !== "ended") {
+			const balances = computeBalances(fresh);
+			fresh.phase = "ended";
+			bump(fresh);
+			await saveSession(fresh, dbVersion);
+			const authUserIds = await loadAuthUserIds(sessionId);
+			await saveSessionHistory(fresh, balances, authUserIds);
+		} else {
+			await removeSession(sessionId);
+		}
+		return true;
+	}
+
+	return false;
+}
+
+export async function removeAfkBettingPlayers(
+	sessionId: string,
+): Promise<void> {
+	const session = await loadSession(sessionId);
+	if (!session?.currentRound) return;
+	if (session.currentRound.phase !== "betting") return;
+
+	const elapsed = Date.now() - session.currentRound.startedAt;
+	if (elapsed < ROUND_FORFEIT_TIMEOUT_SECONDS * 1000) return;
+
+	const connected = await loadConnectedStatus(sessionId);
+	let changed = false;
+
+	for (const player of session.currentRound.players) {
+		if (player.bet > 0) continue;
+		const sessionPlayer = session.players.find((p) => p.id === player.playerId);
+		if (sessionPlayer?.leftAt) continue;
+		if (!connected[player.playerId]) {
+			sessionPlayer!.leftAt = Date.now();
+			changed = true;
+		}
+	}
+
+	if (changed) {
+		session.currentRound.players = session.currentRound.players.filter((p) => {
+			const sp = session.players.find((s) => s.id === p.playerId);
+			return !sp?.leftAt || p.bet > 0;
+		});
+
+		const allLeft = session.players.every((p) => !!p.leftAt);
+		if (allLeft) {
+			session.allDisconnectedAt = session.allDisconnectedAt ?? Date.now();
+		}
+
+		const dbVersion = await getDbVersion(sessionId);
+		bump(session);
+		await saveSession(session, dbVersion);
+	}
+}
+
+function computeBalances(
+	session: GameSession,
+): Record<string, { name: string; balance: number }> {
+	const balances: Record<string, { name: string; balance: number }> = {};
+	for (const p of session.players) {
+		balances[p.id] = { name: p.name, balance: 0 };
+	}
+	for (const round of session.roundHistory) {
+		for (const result of round.results) {
+			if (balances[result.playerId]) {
+				balances[result.playerId].balance += result.netAmount;
+			}
+			if (balances[round.dealerId]) {
+				balances[round.dealerId].balance -= result.netAmount;
+			}
+		}
+	}
+	return balances;
+}
+
+export async function loadEmojis(
+	sessionId: string,
+): Promise<Record<string, { emoji: string; timestamp: number }>> {
+	const db = await ensureDb();
+	const rs = await db.execute({
+		sql: "SELECT player_id, emoji, updated_at FROM emojis WHERE session_id = ?",
+		args: [sessionId],
+	});
+	const map: Record<string, { emoji: string; timestamp: number }> = {};
+	for (const row of rs.rows) {
+		const pid = row.player_id as string;
+		const emoji = row.emoji as string;
+		const timestamp = row.updated_at as number;
+		if (Date.now() - timestamp < 15_000) {
+			map[pid] = { emoji, timestamp };
+		}
+	}
+	return map;
 }

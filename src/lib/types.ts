@@ -36,6 +36,8 @@ export interface Player {
 	isDealer: boolean;
 	/** PromptPay phone-number or Citizen-ID for this player in this session */
 	promptPayId?: string;
+	/** Timestamp when player left/was kicked; still tracked for financial settlement */
+	leftAt?: number;
 }
 
 export interface PlayerInRound {
@@ -56,6 +58,7 @@ export interface GameRound {
 	phase: SessionPhase;
 	players: PlayerInRound[];
 	dealerHand?: PlayerInRound;
+	startedAt: number;
 }
 
 export interface GameSession {
@@ -70,10 +73,15 @@ export interface GameSession {
 	version: number;
 	createdAt: number;
 	updatedAt: number;
+	/** Timestamp when all players disconnected; auto-close after 60s */
+	allDisconnectedAt?: number;
+	/** Kick votes: targetPlayerId -> voterPlayerIds */
+	kickVotes?: Record<string, string[]>;
 }
 
 export interface RoundSummary {
 	roundNumber: number;
+	dealerId: string;
 	dealerTaem: number;
 	dealerHandType: HandType;
 	dealerDeng: number;
@@ -92,11 +100,14 @@ export interface RoundSummary {
 export interface ClientGameView {
 	sessionId: string;
 	phase: SessionPhase;
+	turnStartedAt?: number;
 	version: number;
+	hostId: string;
 	players: Array<{
 		id: string;
 		name: string;
 		isDealer: boolean;
+		isHost?: boolean;
 		cardCount: number;
 		hasDrawn: boolean;
 		hasStood: boolean;
@@ -106,6 +117,8 @@ export interface ClientGameView {
 		bet: number;
 		promptPayId?: string;
 		connected?: boolean;
+		emoji?: { emoji: string; timestamp: number };
+		leftAt?: number;
 	}>;
 	myCards: Card[];
 	myResult?: HandResult;
@@ -114,6 +127,8 @@ export interface ClientGameView {
 	cumulativeBalances: Record<string, number>;
 	/** Map of playerId → their PromptPay ID for payment QR generation */
 	playerPromptPayIds: Record<string, string>;
+	/** Kick votes: targetId -> voterIds */
+	kickVotes: Record<string, string[]>;
 }
 
 export interface PromptPayConfig {

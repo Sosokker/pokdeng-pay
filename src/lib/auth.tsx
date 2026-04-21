@@ -1,10 +1,10 @@
 import {
 	createContext,
+	type ReactNode,
 	useCallback,
 	useContext,
 	useEffect,
 	useState,
-	type ReactNode,
 } from "react";
 
 // Auth types
@@ -46,6 +46,25 @@ function generateGuestId(): string {
 // Storage keys
 const AUTH_STORAGE_KEY = "pokdeng-auth";
 
+function clearStalePlayerData(_userId?: string) {
+	const keysToRemove: string[] = [];
+	for (let i = 0; i < localStorage.length; i++) {
+		const key = localStorage.key(i);
+		if (key && (key.startsWith("player_") || key.startsWith("token_"))) {
+			keysToRemove.push(key);
+		}
+	}
+	for (const key of keysToRemove) {
+		localStorage.removeItem(key);
+	}
+	for (let i = 0; i < sessionStorage.length; i++) {
+		const key = sessionStorage.key(i);
+		if (key?.startsWith("playedAs_")) {
+			sessionStorage.removeItem(key);
+		}
+	}
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
 	const [state, setState] = useState<AuthState>({
 		user: null,
@@ -82,6 +101,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 		const trimmedName = name.trim();
 		if (!trimmedName) return;
 
+		const prevStored = localStorage.getItem(AUTH_STORAGE_KEY);
+		let prevUserId: string | undefined;
+		if (prevStored) {
+			try {
+				prevUserId = (JSON.parse(prevStored) as User).id;
+			} catch {}
+		}
+
 		const user: User = {
 			id: generateGuestId(),
 			name: trimmedName,
@@ -90,8 +117,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 			createdAt: Date.now(),
 		};
 
+		if (prevUserId && prevUserId !== user.id) {
+			clearStalePlayerData(user.id);
+		}
+
 		localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(user));
-		// Also store name in sessionStorage for backward compatibility
 		sessionStorage.setItem("playerName", trimmedName);
 
 		setState({
@@ -108,6 +138,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 	}, []);
 
 	const logout = useCallback(() => {
+		clearStalePlayerData();
 		localStorage.removeItem(AUTH_STORAGE_KEY);
 		sessionStorage.removeItem("playerName");
 		setState({

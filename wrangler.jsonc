@@ -1,7 +1,17 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "tanstack-start-app",
+  "name": "pokdeng-promptpay",
   "compatibility_date": "2025-09-02",
   "compatibility_flags": ["nodejs_compat"],
-  "main": "@tanstack/react-start/server-entry"
+  "main": "@tanstack/react-start/server-entry",
+  "workers_dev": true,
+  "routes": [
+    {
+      "pattern": "pokdeng.sirin.dev",
+      "custom_domain": true
+    }
+  ],
+  "triggers": {
+    "crons": ["*/5 * * * *"]
+  }
 }

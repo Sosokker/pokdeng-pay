@@ -15,24 +15,33 @@ export const Route = createFileRoute("/")({
 });
 
 function LobbyPage() {
-	const sessions = Route.useLoaderData();
+	const initialSessions = Route.useLoaderData();
 	const navigate = useNavigate();
 	const { t } = useI18n();
 	const { user } = useAuth();
 
-	// Pre-fill name from auth context
+	const [sessions, setSessions] = useState(initialSessions);
 	const [playerName, setPlayerName] = useState(user?.name ?? "");
 	const [showCreate, setShowCreate] = useState(false);
 	const [showJoin, setShowJoin] = useState<string | null>(null);
 	const [error, setError] = useState("");
 	const [loading, setLoading] = useState(false);
 
-	// Keep name in sync when auth user changes
 	useEffect(() => {
 		if (user?.name && !playerName) {
 			setPlayerName(user.name);
 		}
 	}, [user?.name, playerName]);
+
+	useEffect(() => {
+		const interval = setInterval(async () => {
+			try {
+				const fresh = await listSessionsFn();
+				setSessions(fresh);
+			} catch {}
+		}, 3000);
+		return () => clearInterval(interval);
+	}, []);
 
 	async function handleCreate() {
 		const name = playerName.trim() || user?.name?.trim() || "";
@@ -47,10 +56,17 @@ function LobbyPage() {
 				data: {
 					hostName: name,
 					promptPayId: user?.promptPayId,
+					authUserId: user?.id,
 				},
 			});
-			sessionStorage.setItem(`player_${result.sessionId}`, result.playerId);
+			localStorage.setItem(`player_${result.sessionId}`, result.playerId);
+			if (result.token) {
+				localStorage.setItem(`token_${result.sessionId}`, result.token);
+			}
 			sessionStorage.setItem("playerName", name);
+			if (user?.id) {
+				sessionStorage.setItem(`playedAs_${result.sessionId}`, user.id);
+			}
 			navigate({
 				to: "/game/$sessionId",
 				params: { sessionId: result.sessionId },
@@ -71,15 +87,35 @@ function LobbyPage() {
 		setLoading(true);
 		setError("");
 		try {
+			const existingPlayerId = localStorage.getItem(`player_${sessionId}`);
+			const existingToken = localStorage.getItem(`token_${sessionId}`);
+			const lastPlayedAs = sessionStorage.getItem(`playedAs_${sessionId}`);
+
+			if (existingPlayerId && existingToken && lastPlayedAs === user?.id) {
+				navigate({
+					to: "/game/$sessionId",
+					params: { sessionId },
+				});
+				return;
+			}
+
 			const result = await joinSessionFn({
 				data: {
 					sessionId,
 					playerName: name,
 					promptPayId: user?.promptPayId,
+					existingPlayerId: existingPlayerId || undefined,
+					authUserId: user?.id,
 				},
 			});
-			sessionStorage.setItem(`player_${result.sessionId}`, result.playerId);
+			localStorage.setItem(`player_${result.sessionId}`, result.playerId);
+			if (result.token) {
+				localStorage.setItem(`token_${result.sessionId}`, result.token);
+			}
 			sessionStorage.setItem("playerName", name);
+			if (user?.id) {
+				sessionStorage.setItem(`playedAs_${sessionId}`, user.id);
+			}
 			navigate({
 				to: "/game/$sessionId",
 				params: { sessionId: result.sessionId },
@@ -92,8 +128,8 @@ function LobbyPage() {
 	}
 
 	return (
-		<div className="max-w-4xl mx-auto space-y-8">
-			<div className="flex items-center justify-between">
+		<div className="max-w-4xl mx-auto space-y-8 pt-10 md:pt-0">
+			<div className="flex flex-wrap items-center justify-between gap-3">
 				<div>
 					<h1 className="text-3xl font-bold text-white flex items-center gap-3">
 						<Gamepad2 className="w-8 h-8 text-blue-400" />
@@ -180,50 +216,52 @@ function LobbyPage() {
 					</div>
 				) : (
 					<div className="grid gap-3">
-						{sessions.map((s) => (
-							<div
-								key={s.id}
-								className="bg-[#27272A] border border-[#3F3F46] rounded-xl p-4 flex items-center justify-between"
-							>
-								<div className="flex items-center gap-4">
-									<div className="w-10 h-10 bg-[#3F3F46] rounded-lg flex items-center justify-center">
-										<Users className="w-5 h-5 text-blue-400" />
+						{sessions
+							.filter((s) => s.phase !== "ended")
+							.map((s) => (
+								<div
+									key={s.id}
+									className="bg-[#27272A] border border-[#3F3F46] rounded-xl p-4 flex items-center justify-between"
+								>
+									<div className="flex items-center gap-4">
+										<div className="w-10 h-10 bg-[#3F3F46] rounded-lg flex items-center justify-center">
+											<Users className="w-5 h-5 text-blue-400" />
+										</div>
+										<div>
+											<p className="text-white font-medium">
+												{t("lobby.sGame", s.hostName)}
+											</p>
+											<p className="text-[#71717A] text-sm">
+												{t("lobby.players", s.playerCount, 17)} &middot;{" "}
+												<span
+													className={
+														s.phase === "lobby"
+															? "text-green-400"
+															: "text-yellow-400"
+													}
+												>
+													{s.phase === "lobby"
+														? t("lobby.waiting")
+														: t("lobby.inProgress")}
+												</span>
+											</p>
+										</div>
 									</div>
-									<div>
-										<p className="text-white font-medium">
-											{t("lobby.sGame", s.hostName)}
-										</p>
-										<p className="text-[#71717A] text-sm">
-											{t("lobby.players", s.playerCount, 17)} &middot;{" "}
-											<span
-												className={
-													s.phase === "lobby"
-														? "text-green-400"
-														: "text-yellow-400"
-												}
-											>
-												{s.phase === "lobby"
-													? t("lobby.waiting")
-													: t("lobby.inProgress")}
-											</span>
-										</p>
-									</div>
+									{s.phase !== "ended" && (
+										<button
+											type="button"
+											onClick={() => {
+												setShowJoin(s.id);
+												setShowCreate(false);
+											}}
+											className="flex items-center gap-2 px-3 py-2 bg-[#3F3F46] hover:bg-[#52525B] text-white rounded-lg text-sm font-medium transition-colors"
+										>
+											<LogIn className="w-4 h-4" />
+											{t("lobby.join")}
+										</button>
+									)}
 								</div>
-								{s.phase === "lobby" && (
-									<button
-										type="button"
-										onClick={() => {
-											setShowJoin(s.id);
-											setShowCreate(false);
-										}}
-										className="flex items-center gap-2 px-3 py-2 bg-[#3F3F46] hover:bg-[#52525B] text-white rounded-lg text-sm font-medium transition-colors"
-									>
-										<LogIn className="w-4 h-4" />
-										{t("lobby.join")}
-									</button>
-								)}
-							</div>
-						))}
+							))}
 					</div>
 				)}
 			</div>

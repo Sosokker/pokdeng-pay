@@ -12,6 +12,9 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as HistoryRouteImport } from './routes/history'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as GameSessionIdRouteImport } from './routes/game.$sessionId'
+import { Route as ApiLeaveRouteImport } from './routes/api/leave'
+import { Route as ApiEventsSessionIdRouteImport } from './routes/api/events/$sessionId'
+import { Route as ApiCronCleanupRouteImport } from './routes/api/cron/cleanup'
 
 const HistoryRoute = HistoryRouteImport.update({
   id: '/history',
@@ -28,35 +31,81 @@ const GameSessionIdRoute = GameSessionIdRouteImport.update({
   path: '/game/$sessionId',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiLeaveRoute = ApiLeaveRouteImport.update({
+  id: '/api/leave',
+  path: '/api/leave',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiEventsSessionIdRoute = ApiEventsSessionIdRouteImport.update({
+  id: '/api/events/$sessionId',
+  path: '/api/events/$sessionId',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiCronCleanupRoute = ApiCronCleanupRouteImport.update({
+  id: '/api/cron/cleanup',
+  path: '/api/cron/cleanup',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/history': typeof HistoryRoute
+  '/api/leave': typeof ApiLeaveRoute
   '/game/$sessionId': typeof GameSessionIdRoute
+  '/api/cron/cleanup': typeof ApiCronCleanupRoute
+  '/api/events/$sessionId': typeof ApiEventsSessionIdRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/history': typeof HistoryRoute
+  '/api/leave': typeof ApiLeaveRoute
   '/game/$sessionId': typeof GameSessionIdRoute
+  '/api/cron/cleanup': typeof ApiCronCleanupRoute
+  '/api/events/$sessionId': typeof ApiEventsSessionIdRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/history': typeof HistoryRoute
+  '/api/leave': typeof ApiLeaveRoute
   '/game/$sessionId': typeof GameSessionIdRoute
+  '/api/cron/cleanup': typeof ApiCronCleanupRoute
+  '/api/events/$sessionId': typeof ApiEventsSessionIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/history' | '/game/$sessionId'
+  fullPaths:
+    | '/'
+    | '/history'
+    | '/api/leave'
+    | '/game/$sessionId'
+    | '/api/cron/cleanup'
+    | '/api/events/$sessionId'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/history' | '/game/$sessionId'
-  id: '__root__' | '/' | '/history' | '/game/$sessionId'
+  to:
+    | '/'
+    | '/history'
+    | '/api/leave'
+    | '/game/$sessionId'
+    | '/api/cron/cleanup'
+    | '/api/events/$sessionId'
+  id:
+    | '__root__'
+    | '/'
+    | '/history'
+    | '/api/leave'
+    | '/game/$sessionId'
+    | '/api/cron/cleanup'
+    | '/api/events/$sessionId'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   HistoryRoute: typeof HistoryRoute
+  ApiLeaveRoute: typeof ApiLeaveRoute
   GameSessionIdRoute: typeof GameSessionIdRoute
+  ApiCronCleanupRoute: typeof ApiCronCleanupRoute
+  ApiEventsSessionIdRoute: typeof ApiEventsSessionIdRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -82,13 +131,37 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof GameSessionIdRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/leave': {
+      id: '/api/leave'
+      path: '/api/leave'
+      fullPath: '/api/leave'
+      preLoaderRoute: typeof ApiLeaveRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/events/$sessionId': {
+      id: '/api/events/$sessionId'
+      path: '/api/events/$sessionId'
+      fullPath: '/api/events/$sessionId'
+      preLoaderRoute: typeof ApiEventsSessionIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/cron/cleanup': {
+      id: '/api/cron/cleanup'
+      path: '/api/cron/cleanup'
+      fullPath: '/api/cron/cleanup'
+      preLoaderRoute: typeof ApiCronCleanupRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   HistoryRoute: HistoryRoute,
+  ApiLeaveRoute: ApiLeaveRoute,
   GameSessionIdRoute: GameSessionIdRoute,
+  ApiCronCleanupRoute: ApiCronCleanupRoute,
+  ApiEventsSessionIdRoute: ApiEventsSessionIdRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

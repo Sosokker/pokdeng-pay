@@ -237,6 +237,7 @@ export function createSession(
 		config: { allowAceHighStraight: config?.allowAceHighStraight ?? false },
 		version: 1,
 		createdAt: Date.now(),
+		updatedAt: Date.now(),
 	};
 	sessions.set(sessionId, session);
 	return session;
@@ -316,6 +317,7 @@ export function startBetting(sessionId: string, playerId: string): void {
 		phase: "betting",
 		players,
 		dealerHand: dealerPlayer,
+		startedAt: Date.now(),
 	};
 	session.phase = "betting";
 	bump(session);
@@ -335,6 +337,7 @@ export function placeBet(
 		(p) => p.playerId === playerId,
 	);
 	if (!player) throw new Error("Player not in round");
+	if (player.bet > 0) throw new Error("Bet already placed");
 	if (amount <= 0 || amount > 1000) throw new Error("Invalid bet amount");
 	player.bet = amount;
 	bump(session);
@@ -526,6 +529,7 @@ export function resolveRound(sessionId: string): void {
 
 	session.roundHistory.push({
 		roundNumber: session.currentRound.roundNumber,
+		dealerId: session.dealerId,
 		dealerTaem: dealerResult.score,
 		dealerHandType: dealerResult.handType,
 		dealerDeng: dealerResult.deng,
@@ -611,8 +615,9 @@ export function getClientView(
 			if (cumulativeBalances[result.playerId] !== undefined) {
 				cumulativeBalances[result.playerId] += result.netAmount;
 			}
-			if (cumulativeBalances[session.dealerId] !== undefined) {
-				cumulativeBalances[session.dealerId] -= result.netAmount;
+			const roundDealerId = r.dealerId;
+			if (cumulativeBalances[roundDealerId] !== undefined) {
+				cumulativeBalances[roundDealerId] -= result.netAmount;
 			}
 		}
 	}
@@ -621,12 +626,15 @@ export function getClientView(
 		sessionId,
 		phase: session.phase,
 		version: session.version,
+		hostId: session.hostId,
 		players,
 		myCards: myData?.cards ?? [],
 		myResult: isReveal ? myData?.result : undefined,
 		roundNumber: round?.roundNumber ?? 0,
 		roundHistory: session.roundHistory,
 		cumulativeBalances,
+		playerPromptPayIds: {},
+		kickVotes: session.kickVotes ?? {},
 	};
 }
 

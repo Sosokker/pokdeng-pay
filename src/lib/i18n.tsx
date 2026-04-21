@@ -2,7 +2,7 @@ import { createContext, useCallback, useContext, useState } from "react";
 
 export type Lang = "en" | "th";
 
-type TranslationValue = string | ((...args: unknown[]) => string);
+type TranslationValue = string | ((...args: any[]) => string);
 type TranslationDict = Record<string, TranslationValue>;
 
 const en: TranslationDict = {
@@ -12,7 +12,6 @@ const en: TranslationDict = {
 	"nav.lobby": "Lobby",
 	"nav.history": "History",
 
-	// Auth translations
 	"auth.welcome": "Welcome to Pok Deng",
 	"auth.chooseMethod": "Choose how you want to play",
 	"auth.loading": "Loading...",
@@ -84,12 +83,38 @@ const en: TranslationDict = {
 	"game.nextRound": "Next Round",
 	"game.endSession": "End Session & Settle",
 	"game.waitingNext": "Waiting for host to start next round or end session...",
+	"game.confirmLeave": "Are you sure you want to leave the game mid-round?",
 	"game.you": "(You)",
+	"game.balance": "Balance",
+	"game.turnToDeal": (name: string) => `It's ${name} turn to deal!`,
+	"game.yourTurnToDeal": "It's your turn to deal!",
+	"game.betPlaced": "Bet Placed",
+	"game.startGame": "Start Game",
+	"game.howToPlay": "How to Play",
+	"game.react": "React",
+	"game.copyInviteLink": "Copy Invite Link",
+	"game.cardSqueezeOn": "Card Squeeze On",
+	"game.cardSqueezeOff": "Card Squeeze Off",
+	"game.roundHistory": "Round History",
+	"game.noHistory": "No history yet.",
+	"game.kickPlayer": "Kick Player",
+	"game.voteKick": "Vote Kick",
+	"game.voteKickCount": (count: number, total: number) =>
+		`${count}/${total} votes`,
+	"game.playerLeft": "Left",
+	"game.noPromptPay": "No PromptPay",
+	"game.viewSettlement": "View Settlement",
+	"game.end": "End",
+	"game.waitingNextRound": "Waiting for next round...",
+	"game.dealer": "Dealer",
+	"game.setupPromptPay": "Setup PromptPay",
+	"game.save": "Save",
+	"game.phoneOrId": "Phone / ID",
 
 	"game.handType.pok": "Pok",
 	"game.handType.tong": "Tong",
 	"game.handType.sam-lueang": "Sam Lueang",
-	"game.handType.normal": "",
+	"game.handType.normal": "Normal",
 	"game.deng": "Deng",
 
 	"game.phase.lobby": "Lobby",
@@ -99,14 +124,16 @@ const en: TranslationDict = {
 	"game.phase.ended": "Ended",
 
 	"settlement.title": "Session Settlement",
+	"settlement.outstandingPayments": "Outstanding Payments",
+	"settlement.allSettled": "All settled. No debts.",
+	"settlement.paid": "Paid",
+	"settlement.disputed": "Disputed",
+	"settlement.exitToLobby": "Exit to Lobby",
 	"settlement.owesDealer": (amount: number) => `Owes ${amount} THB to dealer`,
 	"settlement.paymentResolution": "Payment Resolution",
 	"settlement.paymentHint":
 		"After sending/receiving payment via PromptPay, confirm receipt below.",
 	"settlement.confirmed": "Confirmed",
-	"settlement.disputed": "Disputed",
-	"settlement.received": "Received",
-	"settlement.notReceived": "Not Received",
 	"settlement.disputedMsg":
 		"Some payments are disputed. Please resolve offline and re-confirm.",
 	"settlement.resetDisputed": "Reset Disputed",
@@ -116,6 +143,9 @@ const en: TranslationDict = {
 		`QR for ${name} (${amount} THB)`,
 	"settlement.scanToPay": "Scan to pay with any banking app",
 	"settlement.backToLobby": "Back to Lobby",
+
+	"connection.lost": "Connection Lost",
+	"connection.reconnecting": "Reconnecting to the game server... Please wait.",
 
 	"history.title": "Session History",
 	"history.subtitle":
@@ -127,6 +157,9 @@ const en: TranslationDict = {
 	"error.actionFailed": "Action failed",
 	"error.failedEnd": "Failed to end session",
 	"error.failedQr": "Failed to generate QR",
+	"error.failedKick": "Failed to kick player",
+	"error.sessionExpired": "Session Expired",
+	"error.backToLobby": "Back to Lobby",
 
 	"lang.toggle": "ภาษาไทย",
 };
@@ -138,7 +171,6 @@ const th: TranslationDict = {
 	"nav.lobby": "ห้องรวม",
 	"nav.history": "ประวัติ",
 
-	// Auth translations
 	"auth.welcome": "ยินดีต้อนรับสู่ป๊อกเด้ง",
 	"auth.chooseMethod": "เลือกวิธีการเล่น",
 	"auth.loading": "กำลังโหลด...",
@@ -210,12 +242,38 @@ const th: TranslationDict = {
 	"game.nextRound": "รอบต่อไป",
 	"game.endSession": "จบเซสชันและคำนวณ",
 	"game.waitingNext": "รอเจ้าของเริ่มรอบใหม่หรือจบเซสชัน...",
+	"game.confirmLeave": "คุณแน่ใจหรือไม่ว่าต้องการออกจากเกมระหว่างเล่น?",
 	"game.you": "(คุณ)",
+	"game.balance": "ยอดเงิน",
+	"game.turnToDeal": (name: string) => `ถึงตา ${name} แจกไพ่!`,
+	"game.yourTurnToDeal": "ถึงตาคุณแจกไพ่!",
+	"game.betPlaced": "วางเดิมพันแล้ว",
+	"game.startGame": "เริ่มเกม",
+	"game.howToPlay": "วิธีเล่น",
+	"game.react": "รีแอ็กต์",
+	"game.copyInviteLink": "คัดลอกลิงก์เชิญ",
+	"game.cardSqueezeOn": "เปิดบีบไพ่",
+	"game.cardSqueezeOff": "ปิดบีบไพ่",
+	"game.roundHistory": "ประวัติรอบ",
+	"game.noHistory": "ยังไม่มีประวัติ",
+	"game.kickPlayer": "เตะผู้เล่น",
+	"game.voteKick": "โหวตเตะ",
+	"game.voteKickCount": (count: number, total: number) =>
+		`${count}/${total} เสียง`,
+	"game.playerLeft": "ออกแล้ว",
+	"game.noPromptPay": "ไม่มี PromptPay",
+	"game.viewSettlement": "ดูสรุปยอด",
+	"game.end": "จบ",
+	"game.waitingNextRound": "รอรอบต่อไป...",
+	"game.dealer": "เจ้ามือ",
+	"game.setupPromptPay": "ตั้งค่า PromptPay",
+	"game.save": "บันทึก",
+	"game.phoneOrId": "เบอร์โทร / บัตร",
 
 	"game.handType.pok": "ป๊อก",
 	"game.handType.tong": "ตอง",
 	"game.handType.sam-lueang": "สามเหลือง",
-	"game.handType.normal": "",
+	"game.handType.normal": "ปกติ",
 	"game.deng": "เด้ง",
 
 	"game.phase.lobby": "ห้องรวม",
@@ -225,13 +283,15 @@ const th: TranslationDict = {
 	"game.phase.ended": "จบ",
 
 	"settlement.title": "สรุปยอดเซสชัน",
+	"settlement.outstandingPayments": "ยอดที่ต้องชำระ",
+	"settlement.allSettled": "เรียบร้อย ไม่มีหนี้ค้าง",
+	"settlement.paid": "จ่ายแล้ว",
+	"settlement.disputed": "มีปัญหา",
+	"settlement.exitToLobby": "กลับไปห้องรวม",
 	"settlement.owesDealer": (amount: number) => `ต้องจ่าย ${amount} บาทให้เจ้ามือ`,
 	"settlement.paymentResolution": "ยืนยันการชำระเงิน",
 	"settlement.paymentHint": "หลังจากชำระเงินผ่าน PromptPay กรุณายืนยันด้านล่าง",
 	"settlement.confirmed": "ยืนยันแล้ว",
-	"settlement.disputed": "มีปัญหา",
-	"settlement.received": "ได้รับแล้ว",
-	"settlement.notReceived": "ยังไม่ได้รับ",
 	"settlement.disputedMsg": "มีการชำระเงินที่มีปัญหา กรุณาแก้ไขแล้วยืนยันใหม่",
 	"settlement.resetDisputed": "รีเซ็ตรายการที่มีปัญหา",
 	"settlement.generateQr": "สร้าง QR PromptPay",
@@ -241,6 +301,9 @@ const th: TranslationDict = {
 	"settlement.scanToPay": "สแกนเพื่อชำระผ่านแอปธนาคาร",
 	"settlement.backToLobby": "กลับไปห้องรวม",
 
+	"connection.lost": "การเชื่อมต่อขาดหาย",
+	"connection.reconnecting": "กำลังเชื่อมต่อใหม่... กรุณารอสักครู่",
+
 	"history.title": "ประวัติเซสชัน",
 	"history.subtitle": "ประวัติจะเก็บตามเซสชัน ดูรอบที่ผ่านมาในเกมที่เล่นอยู่",
 	"history.empty": "เข้าร่วมเซสชันเพื่อดูประวัติรอบและรายละเอียดการชำระเงิน",
@@ -249,6 +312,9 @@ const th: TranslationDict = {
 	"error.actionFailed": "ดำเนินการไม่สำเร็จ",
 	"error.failedEnd": "จบเซสชันไม่สำเร็จ",
 	"error.failedQr": "สร้าง QR ไม่สำเร็จ",
+	"error.failedKick": "เตะผู้เล่นไม่สำเร็จ",
+	"error.sessionExpired": "เซสชันหมดอายุ",
+	"error.backToLobby": "กลับไปห้องรวม",
 
 	"lang.toggle": "English",
 };
