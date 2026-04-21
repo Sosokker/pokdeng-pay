@@ -8,7 +8,7 @@ import {
 import { AlertTriangle, Menu, RefreshCw } from "lucide-react";
 import { createContext, useContext, useEffect, useState } from "react";
 import { AuthProvider, useAuth } from "#/lib/auth";
-import { I18nProvider } from "#/lib/i18n";
+import { I18nProvider, useI18n } from "#/lib/i18n";
 import { LoginForm } from "../components/LoginForm";
 import { Sidebar } from "../components/Sidebar";
 import appCss from "../styles.css?url";
@@ -42,19 +42,19 @@ export const Route = createRootRouteWithContext<MyRouterContext>()({
 			{ name: "viewport", content: "width=device-width, initial-scale=1" },
 			{ title: "Pok Deng - Online Card Game" },
 			{
-				"http-equiv": "X-Content-Type-Options",
+				httpEquiv: "X-Content-Type-Options",
 				content: "nosniff",
 			},
 			{
-				"http-equiv": "X-Frame-Options",
+				httpEquiv: "X-Frame-Options",
 				content: "DENY",
 			},
 			{
-				"http-equiv": "Referrer-Policy",
+				httpEquiv: "Referrer-Policy",
 				content: "strict-origin-when-cross-origin",
 			},
 			{
-				"http-equiv": "Permissions-Policy",
+				httpEquiv: "Permissions-Policy",
 				content: "camera=(), microphone=(), geolocation=()",
 			},
 		],
